@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+
+# Secrets — never commit service-account credentials
+service-account.json
+*-firebase-adminsdk-*.json
+
+# Firebase emulator artifacts
+.firebase/
+*-debug.log

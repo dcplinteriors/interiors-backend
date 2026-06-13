@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// The backend is the ONLY Firestore client (via the Admin SDK, which bypasses these rules).
+// App clients never access Firestore directly, so all direct client access is denied.
+// See docs/decisions/0004-backend-api-tier.md.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
