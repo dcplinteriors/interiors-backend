@@ -19,6 +19,6 @@
     "declaration": false,
     "types": ["node", "jest"]
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "api/**/*"],
   "exclude": ["node_modules", "dist", "coverage"]
 }
