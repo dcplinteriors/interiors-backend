@@ -4,6 +4,7 @@ import { TokenVerifier } from '../../src/services/auth/tokenVerifier';
 import { FakeProjectRepository } from '../fakes/fakeProjectRepository';
 import { FakeWorkOrderRepository } from '../fakes/fakeWorkOrderRepository';
 import { FakeCounterRepository } from '../fakes/fakeCounterRepository';
+import { FakeUserRepository } from '../fakes/fakeUserRepository';
 import { Project } from '../../src/models/project';
 import { WorkOrder } from '../../src/models/workOrder';
 
@@ -40,11 +41,16 @@ function setup(
   const projectRepository = new FakeProjectRepository(opts.projects ?? []);
   const workOrderRepository = new FakeWorkOrderRepository(opts.workOrders ?? []);
   const counterRepository = new FakeCounterRepository();
+  // Inject a fake user repo — the project-detail endpoint resolves supervisor
+  // names via userRepository.findByUids(). Without this it falls through to the
+  // real FirestoreUserRepository, which hangs in CI (no Firebase creds).
+  const userRepository = new FakeUserRepository([]);
   const app = buildApp({
     tokenVerifier: verifier,
     projectRepository,
     workOrderRepository,
     counterRepository,
+    userRepository,
   });
   return { app, projectRepository, workOrderRepository };
 }
