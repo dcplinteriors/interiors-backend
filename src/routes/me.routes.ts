@@ -1,10 +1,16 @@
 import { Router } from 'express';
 import { Container } from '../container';
-import { authenticate } from '../middlewares/auth';
-import { meController } from '../controllers/me.controller';
+import { authenticate, requireRole } from '../middlewares/auth';
+import { buildMeController } from '../controllers/me.controller';
 
 export function buildMeRoutes(container: Container): Router {
+  const controller = buildMeController(container.userRepository);
   const router = Router();
-  router.get('/', authenticate(container.tokenVerifier), meController);
+
+  router.use(authenticate(container.tokenVerifier));
+
+  router.get('/', controller.get);
+  router.patch('/', requireRole('supervisor'), controller.update); // supervisor edits own profile
+
   return router;
 }

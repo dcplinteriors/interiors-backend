@@ -40,4 +40,12 @@ export class FakeUserRepository implements UserRepository {
       .sort(byCreatedAtThenUidDesc);
     return paginateSorted(sorted, query.limit, query.cursor, (u) => u.uid);
   }
+
+  async update(uid: string, patch: Partial<Omit<UserRecord, 'uid'>>): Promise<UserRecord | null> {
+    const existing = this.byUid.get(uid);
+    if (!existing) return null;
+    const updated = { ...existing, ...patch, uid };
+    this.byUid.set(uid, updated);
+    return updated;
+  }
 }

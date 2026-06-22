@@ -2,11 +2,11 @@ import request from 'supertest';
 import { adminVerifier, buildApp, bearer, supervisorVerifier } from '../helpers/testApp';
 import { TokenVerifier } from '../../src/services/auth/tokenVerifier';
 import { FakeUserRepository } from '../fakes/fakeUserRepository';
-import { FakeProjectRepository } from '../fakes/fakeProjectRepository';
+import { FakeWorkOrderRepository } from '../fakes/fakeWorkOrderRepository';
 import { FakeAuthAdmin } from '../fakes/fakeAuthAdmin';
 import { FakeInviteEmailService } from '../fakes/fakeInviteEmailService';
 import { UserRecord } from '../../src/models/user';
-import { Project } from '../../src/models/project';
+import { WorkOrder } from '../../src/models/workOrder';
 
 const supervisor = (over: Partial<UserRecord> = {}): UserRecord => ({
   uid: 'sup1',
@@ -14,19 +14,23 @@ const supervisor = (over: Partial<UserRecord> = {}): UserRecord => ({
   name: 'S',
   email: 's@dcpl.test',
   isActive: true,
-  createdAt: '2025-06-01T00:00:00.000Z',
+  createdAt: '2026-06-01T00:00:00.000Z',
   ...over,
 });
 
-function setup(verifier: TokenVerifier = adminVerifier, seed: UserRecord[] = [], projects: Project[] = []) {
+function setup(
+  verifier: TokenVerifier = adminVerifier,
+  seed: UserRecord[] = [],
+  workOrders: WorkOrder[] = [],
+) {
   const userRepository = new FakeUserRepository(seed);
-  const projectRepository = new FakeProjectRepository(projects);
+  const workOrderRepository = new FakeWorkOrderRepository(workOrders);
   const authAdmin = new FakeAuthAdmin();
   const inviteEmail = new FakeInviteEmailService();
   const app = buildApp({
     tokenVerifier: verifier,
     userRepository,
-    projectRepository,
+    workOrderRepository,
     authAdmin,
     inviteEmail,
   });
@@ -50,6 +54,7 @@ describe('POST /api/supervisors', () => {
       isActive: true,
       mustChangePassword: true,
       createdBy: 'admin1',
+      workOrders: [],
     });
     expect(res.body.uid).toBeTruthy();
     expect(authAdmin.roles.get(res.body.uid)).toBe('supervisor');
@@ -82,7 +87,9 @@ describe('POST /api/supervisors', () => {
   });
 
   it('rejects a duplicate email with 409 (no Auth user or email)', async () => {
-    const { app, authAdmin, inviteEmail } = setup(adminVerifier, [supervisor({ email: 'dupe@dcpl.test' })]);
+    const { app, authAdmin, inviteEmail } = setup(adminVerifier, [
+      supervisor({ email: 'dupe@dcpl.test' }),
+    ]);
 
     const res = await request(app)
       .post('/api/supervisors')
@@ -157,9 +164,9 @@ describe('GET /api/supervisors', () => {
 
   it('cursor-paginates supervisors with limit, exposing nextCursor', async () => {
     const { app } = setup(adminVerifier, [
-      supervisor({ uid: 'sup1', email: 'a@dcpl.test', createdAt: '2025-06-01T00:00:00.000Z' }),
-      supervisor({ uid: 'sup2', email: 'b@dcpl.test', createdAt: '2025-06-02T00:00:00.000Z' }),
-      supervisor({ uid: 'sup3', email: 'c@dcpl.test', createdAt: '2025-06-03T00:00:00.000Z' }),
+      supervisor({ uid: 'sup1', email: 'a@dcpl.test', createdAt: '2026-06-01T00:00:00.000Z' }),
+      supervisor({ uid: 'sup2', email: 'b@dcpl.test', createdAt: '2026-06-02T00:00:00.000Z' }),
+      supervisor({ uid: 'sup3', email: 'c@dcpl.test', createdAt: '2026-06-03T00:00:00.000Z' }),
     ]);
 
     const first = await request(app).get('/api/supervisors?limit=2').set(...bearer());
@@ -173,16 +180,17 @@ describe('GET /api/supervisors', () => {
     expect(second.body.nextCursor).toBeNull();
   });
 
-  it('includes each supervisor’s assigned project names (empty when none)', async () => {
-    const proj = (over: Partial<Project>): Project => ({
-      id: 'p1',
-      particular: 'Lobby',
-      clientName: 'Acme',
-      date: '2025-06-10',
-      po: 'PO_25-26_06/0001',
+  it('includes each supervisor’s assigned work-order names (empty when none)', async () => {
+    const wo = (over: Partial<WorkOrder>): WorkOrder => ({
+      id: 'wo1',
+      project: 'p1',
+      number: '26-27_0001/0001',
+      name: 'WO',
+      date: '2026-06-10',
+      description: null,
       supervisorId: null,
       status: 'active',
-      createdAt: '2025-06-01T00:00:00.000Z',
+      createdAt: '2026-06-01T00:00:00.000Z',
       createdBy: 'admin1',
       ...over,
     });
@@ -190,16 +198,16 @@ describe('GET /api/supervisors', () => {
       adminVerifier,
       [supervisor({ uid: 'sup1', email: 'a@dcpl.test' }), supervisor({ uid: 'sup2', email: 'b@dcpl.test' })],
       [
-        proj({ id: 'p1', particular: 'Lobby', supervisorId: 'sup1', createdAt: '2025-06-02T00:00:00.000Z' }),
-        proj({ id: 'p2', particular: 'Tower', supervisorId: 'sup1', createdAt: '2025-06-01T00:00:00.000Z' }),
+        wo({ id: 'w1', name: 'Lobby WO', supervisorId: 'sup1', createdAt: '2026-06-02T00:00:00.000Z' }),
+        wo({ id: 'w2', name: 'Tower WO', supervisorId: 'sup1', createdAt: '2026-06-01T00:00:00.000Z' }),
       ],
     );
 
     const res = await request(app).get('/api/supervisors').set(...bearer());
 
     const byUid = Object.fromEntries(res.body.items.map((s: { uid: string }) => [s.uid, s]));
-    expect(byUid['sup1'].projects).toEqual(['Lobby', 'Tower']); // newest-first by createdAt
-    expect(byUid['sup2'].projects).toEqual([]);
+    expect(byUid['sup1'].workOrders).toEqual(['Lobby WO', 'Tower WO']); // newest-first by createdAt
+    expect(byUid['sup2'].workOrders).toEqual([]);
   });
 
   it('requires authentication (401)', async () => {

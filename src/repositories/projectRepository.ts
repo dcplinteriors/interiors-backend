@@ -4,7 +4,8 @@ import { Page, PageQuery } from '../utils/pagination';
 export type CreateProjectInput = Omit<Project, 'id'>;
 export type ProjectPatch = Partial<Omit<Project, 'id'>>;
 
-/** Persistence port for `projects`. */
+/** Persistence port for `projects`. Supervisors are assigned at the work-order level, so there's
+ * no supervisor-scoped project query here. */
 export interface ProjectRepository {
   create(input: CreateProjectInput): Promise<Project>;
   findById(id: string): Promise<Project | null>;
@@ -12,10 +13,9 @@ export interface ProjectRepository {
   findByIds(ids: string[]): Promise<Project[]>;
   /** Cursor-paginated admin list (newest first). */
   list(query?: PageQuery): Promise<Page<Project>>;
-  /** Projects assigned to any of the given supervisors (batched), newest first. Used to
-   * resolve a page of supervisors' project names without scanning the whole collection. */
-  findBySupervisorIds(supervisorIds: string[]): Promise<Project[]>;
-  /** A supervisor's own projects, cursor-paginated (newest first). */
-  listBySupervisor(supervisorId: string, query?: PageQuery): Promise<Page<Project>>;
   update(id: string, patch: ProjectPatch): Promise<Project | null>;
+  /** Atomically transitions a project in a Firestore transaction: reads it, applies `decide`
+   * (which validates and returns a patch, or throws to abort), then writes — so the status check
+   * and the write can't race. Returns the updated project, or `null` if it doesn't exist. */
+  transition(id: string, decide: (current: Project) => ProjectPatch): Promise<Project | null>;
 }

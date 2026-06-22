@@ -1,53 +1,49 @@
 import {
   financialYear,
-  monthSegment,
-  periodKey,
-  formatSequenceNumber,
-  formatPoNumber,
-  formatJobNumber,
+  formatProjectNumber,
+  formatWorkOrderNumber,
+  formatItemNumber,
 } from '../../src/utils/numbering';
 
-// Note: month is 0-indexed in the Date constructor (5 = June).
+// Dates are given as explicit UTC instants so the assertions are independent of the machine's
+// timezone — the FY is resolved against IST wall-clock inside `financialYear`.
 
-describe('financialYear (Indian FY, Apr–Mar)', () => {
+describe('financialYear (Indian FY, Apr–Mar, IST)', () => {
   it('maps a date in/after April to YY-(YY+1)', () => {
-    expect(financialYear(new Date(2025, 3, 1))).toBe('25-26'); // Apr 2025
-    expect(financialYear(new Date(2025, 5, 15))).toBe('25-26'); // Jun 2025
-    expect(financialYear(new Date(2025, 11, 31))).toBe('25-26'); // Dec 2025
+    expect(financialYear(new Date('2026-04-15T00:00:00Z'))).toBe('26-27'); // Apr 2026
+    expect(financialYear(new Date('2026-06-15T00:00:00Z'))).toBe('26-27'); // Jun 2026
+    expect(financialYear(new Date('2026-12-31T00:00:00Z'))).toBe('26-27'); // Dec 2026
   });
 
   it('maps a date before April to (YY-1)-YY', () => {
-    expect(financialYear(new Date(2026, 0, 10))).toBe('25-26'); // Jan 2026
-    expect(financialYear(new Date(2026, 2, 31))).toBe('25-26'); // Mar 2026
-    expect(financialYear(new Date(2025, 2, 1))).toBe('24-25'); // Mar 2025
+    expect(financialYear(new Date('2027-01-10T00:00:00Z'))).toBe('26-27'); // Jan 2027
+    expect(financialYear(new Date('2027-03-15T00:00:00Z'))).toBe('26-27'); // Mar 2027
+    expect(financialYear(new Date('2026-03-15T00:00:00Z'))).toBe('25-26'); // Mar 2026
+  });
+
+  it('resolves the Apr-1 boundary in IST, not the server timezone', () => {
+    // 2026-03-31T18:30Z == 2026-04-01 00:00 IST → the new FY begins.
+    expect(financialYear(new Date('2026-03-31T18:30:00Z'))).toBe('26-27');
+    // One minute earlier is still 2026-03-31 23:59 IST → the old FY.
+    expect(financialYear(new Date('2026-03-31T18:29:00Z'))).toBe('25-26');
   });
 });
 
-describe('monthSegment', () => {
-  it('zero-pads the month', () => {
-    expect(monthSegment(new Date(2025, 5, 1))).toBe('06');
-    expect(monthSegment(new Date(2025, 11, 1))).toBe('12');
-  });
-});
+describe('hierarchical number formatting', () => {
+  const apr2026 = new Date('2026-04-15T00:00:00Z');
 
-describe('periodKey', () => {
-  it('combines financial year and month', () => {
-    expect(periodKey(new Date(2025, 5, 1))).toBe('25-26_06');
-    expect(periodKey(new Date(2026, 0, 1))).toBe('25-26_01');
-  });
-});
-
-describe('PO / Job number formatting', () => {
-  it('formats a PO number', () => {
-    expect(formatPoNumber(new Date(2025, 5, 1), 1)).toBe('PO_25-26_06/0001');
+  it('formats a project number: FY_NNNN', () => {
+    expect(formatProjectNumber(apr2026, 1)).toBe('26-27_0001');
+    expect(formatProjectNumber(apr2026, 42)).toBe('26-27_0042');
   });
 
-  it('formats a Job number', () => {
-    expect(formatJobNumber(new Date(2025, 5, 1), 1)).toBe('JB_25-26_06/0001');
+  it('formats a work-order number: <projectNumber>/NNNN', () => {
+    expect(formatWorkOrderNumber('26-27_0001', 1)).toBe('26-27_0001/0001');
+    expect(formatWorkOrderNumber('26-27_0001', 12)).toBe('26-27_0001/0012');
   });
 
-  it('zero-pads the counter to 4 digits', () => {
-    expect(formatSequenceNumber('PO', new Date(2025, 5, 1), 42)).toBe('PO_25-26_06/0042');
-    expect(formatSequenceNumber('JB', new Date(2026, 0, 1), 1234)).toBe('JB_25-26_01/1234');
+  it('formats an item number: <workOrderNumber>/NNNN', () => {
+    expect(formatItemNumber('26-27_0001/0001', 1)).toBe('26-27_0001/0001/0001');
+    expect(formatItemNumber('26-27_0001/0002', 305)).toBe('26-27_0001/0002/0305');
   });
 });

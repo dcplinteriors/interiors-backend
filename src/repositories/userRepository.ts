@@ -11,4 +11,7 @@ export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
   /** Cursor-paginated list of users with the given role (newest first). */
   listByRole(role: Role, query?: PageQuery): Promise<Page<UserRecord>>;
+  /** Merges a partial patch into a user record (own-profile edits). Returns the merged record,
+   * or null if the user doesn't exist. */
+  update(uid: string, patch: Partial<Omit<UserRecord, 'uid'>>): Promise<UserRecord | null>;
 }

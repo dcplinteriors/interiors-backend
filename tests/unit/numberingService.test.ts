@@ -1,46 +1,63 @@
 import { NumberingService } from '../../src/services/numbering/numberingService';
 import { FakeCounterRepository } from '../fakes/fakeCounterRepository';
 
-const JUNE_2025 = new Date(2025, 5, 1);
-const JULY_2025 = new Date(2025, 6, 1);
+// Explicit UTC instants so FY assertions don't depend on the test machine's timezone.
+const MAR_2027 = new Date('2027-03-15T00:00:00Z');
+const APR_2026 = new Date('2026-04-15T00:00:00Z');
+const APR_2027 = new Date('2027-04-15T00:00:00Z');
 
 describe('NumberingService', () => {
-  it('produces sequential PO numbers within a month', async () => {
+  it('produces sequential project numbers within a financial year', async () => {
     const svc = new NumberingService(new FakeCounterRepository());
-    expect(await svc.nextPoNumber(JUNE_2025)).toBe('PO_25-26_06/0001');
-    expect(await svc.nextPoNumber(JUNE_2025)).toBe('PO_25-26_06/0002');
+    expect(await svc.nextProjectNumber(APR_2026)).toBe('26-27_0001');
+    expect(await svc.nextProjectNumber(APR_2026)).toBe('26-27_0002');
   });
 
-  it('keeps PO and Job sequences independent', async () => {
+  it('resets the project counter across the financial-year boundary (Mar → Apr)', async () => {
     const svc = new NumberingService(new FakeCounterRepository());
-    await svc.nextPoNumber(JUNE_2025); // PO 0001
-    expect(await svc.nextJobNumber(JUNE_2025)).toBe('JB_25-26_06/0001');
+    expect(await svc.nextProjectNumber(MAR_2027)).toBe('26-27_0001'); // Mar 2027
+    expect(await svc.nextProjectNumber(APR_2027)).toBe('27-28_0001'); // Apr 2027
   });
 
-  it('nextJobNumbers reserves a contiguous block in ONE counter call', async () => {
+  it('numbers work orders per project — the counter resets per project', async () => {
+    const svc = new NumberingService(new FakeCounterRepository());
+    expect(await svc.nextWorkOrderNumber('projA', '26-27_0001')).toBe('26-27_0001/0001');
+    expect(await svc.nextWorkOrderNumber('projA', '26-27_0001')).toBe('26-27_0001/0002');
+    // A different project starts its own work-order sequence at 0001.
+    expect(await svc.nextWorkOrderNumber('projB', '26-27_0002')).toBe('26-27_0002/0001');
+  });
+
+  it('reserves a contiguous block of work-order numbers in ONE counter call', async () => {
     const counters = new FakeCounterRepository();
     const svc = new NumberingService(counters);
 
-    const first = await svc.nextJobNumbers(JUNE_2025, 3);
-    expect(first).toEqual(['JB_25-26_06/0001', 'JB_25-26_06/0002', 'JB_25-26_06/0003']);
+    expect(await svc.nextWorkOrderNumbers('projA', '26-27_0001', 3)).toEqual([
+      '26-27_0001/0001',
+      '26-27_0001/0002',
+      '26-27_0001/0003',
+    ]);
     expect(counters.reserveCalls).toBe(1); // one transaction for the whole block, not 3
 
     // The next reservation continues the sequence (no gaps, no overlap).
-    expect(await svc.nextJobNumbers(JUNE_2025, 2)).toEqual([
-      'JB_25-26_06/0004',
-      'JB_25-26_06/0005',
+    expect(await svc.nextWorkOrderNumbers('projA', '26-27_0001', 2)).toEqual([
+      '26-27_0001/0004',
+      '26-27_0001/0005',
     ]);
   });
 
-  it('resets the counter when the month changes', async () => {
-    const svc = new NumberingService(new FakeCounterRepository());
-    await svc.nextPoNumber(JUNE_2025); // 0001
-    expect(await svc.nextPoNumber(JULY_2025)).toBe('PO_25-26_07/0001');
-  });
+  it('numbers items per work order in one reservation — the counter resets per work order', async () => {
+    const counters = new FakeCounterRepository();
+    const svc = new NumberingService(counters);
 
-  it('resets the counter across the financial-year boundary (Mar → Apr)', async () => {
-    const svc = new NumberingService(new FakeCounterRepository());
-    expect(await svc.nextPoNumber(new Date(2026, 2, 31))).toBe('PO_25-26_03/0001'); // Mar 2026
-    expect(await svc.nextPoNumber(new Date(2026, 3, 1))).toBe('PO_26-27_04/0001'); // Apr 2026
+    expect(await svc.nextItemNumbers('woA', '26-27_0001/0001', 2)).toEqual([
+      '26-27_0001/0001/0001',
+      '26-27_0001/0001/0002',
+    ]);
+    expect(counters.reserveCalls).toBe(1);
+
+    // Another work order has its own item sequence from 0001.
+    expect(await svc.nextItemNumbers('woB', '26-27_0001/0002', 1)).toEqual([
+      '26-27_0001/0002/0001',
+    ]);
   });
 });

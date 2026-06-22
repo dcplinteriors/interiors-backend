@@ -2,22 +2,41 @@ import { AppError } from '../../utils/AppError';
 import { uniqueDefined } from '../../utils/collection';
 import { Clock } from '../../utils/clock';
 import { AuthUser } from '../../types/auth';
-import { Project } from '../../models/project';
+import { WorkOrder } from '../../models/workOrder';
 import { ProjectRepository } from '../../repositories/projectRepository';
+import {
+  CreateWorkOrderInput,
+  WorkOrderRepository,
+} from '../../repositories/workOrderRepository';
 import { UserRepository } from '../../repositories/userRepository';
-import { ProjectView, toProjectView } from '../../views/projectView';
 import { Page, PageQuery } from '../../utils/pagination';
+import {
+  ProjectDetail,
+  ProjectListItem,
+  toProjectDetail,
+  toProjectListItem,
+} from '../../views/projectView';
+import { WorkOrderView, toWorkOrderView } from '../../views/workOrderView';
 import { NumberingService } from '../numbering/numberingService';
+import { isWorkOrderTerminal } from '../workOrder/workOrder.stateMachine';
+
+export interface ProjectWorkOrderInput {
+  name: string;
+  date: string;
+  description?: string;
+}
 
 export interface CreateProjectServiceInput {
-  particular: string;
+  name: string;
   clientName: string;
-  date: string;
+  projectEngineer: string;
+  workOrders: ProjectWorkOrderInput[];
   createdBy: string;
 }
 
 export interface ProjectServiceDeps {
   projectRepository: ProjectRepository;
+  workOrderRepository: WorkOrderRepository;
   userRepository: UserRepository;
   numberingService: NumberingService;
   clock: Clock;
@@ -26,70 +45,103 @@ export interface ProjectServiceDeps {
 export class ProjectService {
   constructor(private readonly deps: ProjectServiceDeps) {}
 
-  /** Creates a project, generating its PO number at creation time. */
-  async create(input: CreateProjectServiceInput): Promise<Project> {
+  /** Creates a project together with its work orders in one flow. Reserves the project number,
+   * then a block of work-order numbers (one counter write), and returns the project + its WOs. */
+  async create(input: CreateProjectServiceInput): Promise<ProjectDetail> {
     const now = this.deps.clock();
-    const po = await this.deps.numberingService.nextPoNumber(now);
-
-    return this.deps.projectRepository.create({
-      particular: input.particular,
+    const number = await this.deps.numberingService.nextProjectNumber(now);
+    const project = await this.deps.projectRepository.create({
+      number,
+      name: input.name,
       clientName: input.clientName,
-      date: input.date,
-      po,
-      supervisorId: null,
+      projectEngineer: input.projectEngineer,
       status: 'active',
       createdAt: now.toISOString(),
       createdBy: input.createdBy,
     });
+
+    const numbers = await this.deps.numberingService.nextWorkOrderNumbers(
+      project.id,
+      project.number,
+      input.workOrders.length,
+    );
+    const woInputs: CreateWorkOrderInput[] = input.workOrders.map((w, i) => ({
+      project: project.id,
+      number: numbers[i],
+      name: w.name,
+      date: w.date,
+      description: w.description ?? null,
+      supervisorId: null,
+      status: 'pending',
+      createdAt: now.toISOString(),
+      createdBy: input.createdBy,
+    }));
+    const workOrders = await this.deps.workOrderRepository.createMany(woInputs);
+
+    return toProjectDetail(project, await this.enrichWorkOrders(workOrders));
   }
 
-  /** Admins see all projects; supervisors see only their own. One cursor-paginated page,
-   * each row carrying its assigned supervisor's name (resolved here so clients don't look it up). */
-  async listForUser(auth: AuthUser, query: PageQuery = {}): Promise<Page<ProjectView>> {
-    const page =
-      auth.role === 'admin'
-        ? await this.deps.projectRepository.list(query)
-        : await this.deps.projectRepository.listBySupervisor(auth.uid, query);
-    const names = await this.supervisorNames(page.items.map((p) => p.supervisorId));
-    return { items: page.items.map((p) => toProjectView(p, names)), nextCursor: page.nextCursor };
+  /** Admin list of projects, each carrying a count of its work orders. */
+  async list(query: PageQuery = {}): Promise<Page<ProjectListItem>> {
+    const page = await this.deps.projectRepository.list(query);
+    const workOrders = await this.deps.workOrderRepository.findByProjectIds(
+      page.items.map((p) => p.id),
+    );
+    const counts = new Map<string, number>();
+    for (const w of workOrders) counts.set(w.project, (counts.get(w.project) ?? 0) + 1);
+    return {
+      items: page.items.map((p) => toProjectListItem(p, counts.get(p.id) ?? 0)),
+      nextCursor: page.nextCursor,
+    };
   }
 
-  /** uid → name, for the assigned supervisors referenced by [supervisorIds]. */
-  private async supervisorNames(supervisorIds: (string | null)[]): Promise<Map<string, string>> {
-    const uids = uniqueDefined(supervisorIds);
-    if (uids.length === 0) return new Map();
-    const users = await this.deps.userRepository.findByUids(uids);
-    return new Map(users.map((u) => [u.uid, u.name]));
-  }
-
-  async getForUser(id: string, auth: AuthUser): Promise<Project> {
+  /** A project with its work orders. A supervisor sees ONLY the work orders assigned to them
+   * (and must have at least one), so sibling work orders stay hidden. */
+  async getForUser(id: string, auth: AuthUser): Promise<ProjectDetail> {
     const project = await this.deps.projectRepository.findById(id);
-    if (!project) {
-      throw new AppError(404, 'Project not found');
+    if (!project) throw new AppError(404, 'Project not found');
+
+    const all = await this.deps.workOrderRepository.findByProject(id);
+    if (auth.role === 'supervisor') {
+      const own = all.filter((w) => w.supervisorId === auth.uid);
+      if (own.length === 0) throw new AppError(403, 'Forbidden');
+      return toProjectDetail(project, await this.enrichWorkOrders(own));
     }
-    if (auth.role === 'supervisor' && project.supervisorId !== auth.uid) {
-      throw new AppError(403, 'Forbidden');
-    }
-    return project;
+    return toProjectDetail(project, await this.enrichWorkOrders(all));
   }
 
-  /** Assigns an existing supervisor to a project (admin action). */
-  async assignSupervisor(projectId: string, supervisorId: string): Promise<ProjectView> {
-    const project = await this.deps.projectRepository.findById(projectId);
-    if (!project) {
-      throw new AppError(404, 'Project not found');
-    }
+  /** Completes a project (admin) — gated on every work order being `completed` or `cancelled`. */
+  async complete(projectId: string): Promise<ProjectDetail> {
+    // The work-order gate is read before the transaction; the project's own status is re-checked
+    // atomically with the write, so two admins can't double-complete. (Work orders never leave a
+    // terminal state, so the gate result can't be invalidated by a concurrent WO transition; the
+    // only narrow window is a work order being added mid-complete, which `addToProject` blocks once
+    // the project is `completed`.)
+    const workOrders = await this.deps.workOrderRepository.findByProject(projectId);
+    const allTerminal = workOrders.every((w) => isWorkOrderTerminal(w.status));
+    const updated = await this.deps.projectRepository.transition(projectId, (project) => {
+      if (project.status === 'completed') {
+        throw new AppError(409, 'Project is already completed');
+      }
+      if (!allTerminal) {
+        throw new AppError(409, 'Project has work orders that are not completed or cancelled');
+      }
+      return { status: 'completed' };
+    });
+    if (!updated) throw new AppError(404, 'Project not found');
+    return toProjectDetail(updated, await this.enrichWorkOrders(workOrders));
+  }
 
-    const user = await this.deps.userRepository.findByUid(supervisorId);
-    if (!user || user.role !== 'supervisor') {
-      throw new AppError(400, 'Supervisor not found');
-    }
-
-    const updated = await this.deps.projectRepository.update(projectId, { supervisorId });
-    if (!updated) {
-      throw new AppError(404, 'Project not found');
-    }
-    // We just resolved the supervisor — return the name so the client doesn't refetch.
-    return toProjectView(updated, new Map([[user.uid, user.name]]));
+  private async enrichWorkOrders(workOrders: WorkOrder[]): Promise<WorkOrderView[]> {
+    if (workOrders.length === 0) return [];
+    const projectIds = uniqueDefined(workOrders.map((w) => w.project));
+    const supervisorIds = uniqueDefined(workOrders.map((w) => w.supervisorId));
+    const [projects, supervisors] = await Promise.all([
+      this.deps.projectRepository.findByIds(projectIds),
+      this.deps.userRepository.findByUids(supervisorIds),
+    ]);
+    const projectsById = new Map(projects.map((p) => [p.id, p]));
+    const supervisorNames = new Map(supervisors.map((s) => [s.uid, s.name]));
+    return workOrders.map((w) => toWorkOrderView(w, projectsById, supervisorNames));
   }
 }

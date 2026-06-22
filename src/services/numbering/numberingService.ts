@@ -1,31 +1,65 @@
 import { CounterRepository } from '../../repositories/counterRepository';
-import { formatJobNumber, formatPoNumber, periodKey } from '../../utils/numbering';
+import {
+  financialYear,
+  formatItemNumber,
+  formatProjectNumber,
+  formatWorkOrderNumber,
+} from '../../utils/numbering';
 
-const PO_SEQUENCE = 'po';
-const JOB_SEQUENCE = 'jb';
+const PROJECT_SEQUENCE = 'project';
+const WORK_ORDER_SEQUENCE = 'workOrder';
+const ITEM_SEQUENCE = 'item';
 
 /**
- * Produces the next PO / Job number for a given date, combining a transactional
- * monthly counter with the pure formatter. PO and Job have independent sequences.
+ * Hierarchical, financial-year-aware number generation, combining the transactional counters
+ * with the pure formatters. Three independent counter scopes (the `periodKey` is the reset
+ * boundary):
+ *
+ *   - project number    resets per financial year   (period = FY, e.g. `26-27`)
+ *   - work-order number resets per project          (period = projectId)
+ *   - item number       resets per work order        (period = workOrderId)
  */
 export class NumberingService {
   constructor(private readonly counters: CounterRepository) {}
 
-  async nextPoNumber(date: Date): Promise<string> {
-    const counter = await this.counters.next(PO_SEQUENCE, periodKey(date));
-    return formatPoNumber(date, counter);
-  }
-
-  async nextJobNumber(date: Date): Promise<string> {
-    return (await this.nextJobNumbers(date, 1))[0];
+  /** Next project number for `date`, e.g. `26-27_0001`. */
+  async nextProjectNumber(date: Date): Promise<string> {
+    const counter = await this.counters.next(PROJECT_SEQUENCE, financialYear(date));
+    return formatProjectNumber(date, counter);
   }
 
   /**
-   * Reserves `count` contiguous Job numbers in a SINGLE counter transaction and formats
-   * them in order. Used for multi-item submissions so they don't hammer the counter doc.
+   * Reserves `count` contiguous work-order numbers under one project in a SINGLE counter
+   * transaction (so creating a project with N work orders is one counter write, not N), and
+   * formats them in order as `<projectNumber>/NNNN`.
    */
-  async nextJobNumbers(date: Date, count: number): Promise<string[]> {
-    const start = await this.counters.reserve(JOB_SEQUENCE, periodKey(date), count);
-    return Array.from({ length: count }, (_, i) => formatJobNumber(date, start + i));
+  async nextWorkOrderNumbers(
+    projectId: string,
+    projectNumber: string,
+    count: number,
+  ): Promise<string[]> {
+    const start = await this.counters.reserve(WORK_ORDER_SEQUENCE, projectId, count);
+    return Array.from({ length: count }, (_, i) =>
+      formatWorkOrderNumber(projectNumber, start + i),
+    );
+  }
+
+  /** Adds a single work order to an existing project. */
+  async nextWorkOrderNumber(projectId: string, projectNumber: string): Promise<string> {
+    return (await this.nextWorkOrderNumbers(projectId, projectNumber, 1))[0];
+  }
+
+  /**
+   * Reserves `count` contiguous item numbers under one work order in a SINGLE counter
+   * transaction (a multi-item submission is one counter write, not N), formatted
+   * `<workOrderNumber>/NNNN`.
+   */
+  async nextItemNumbers(
+    workOrderId: string,
+    workOrderNumber: string,
+    count: number,
+  ): Promise<string[]> {
+    const start = await this.counters.reserve(ITEM_SEQUENCE, workOrderId, count);
+    return Array.from({ length: count }, (_, i) => formatItemNumber(workOrderNumber, start + i));
   }
 }

@@ -1,19 +1,19 @@
 export type ProjectStatus = 'active' | 'completed';
 
 /**
- * An interior project / job. Created by an admin; has exactly one supervisor (once assigned).
- * `po` is the project's PO number, generated at creation and inherited by its material requests.
+ * An interior project. Created by an admin together with its work orders. Supervisors are
+ * assigned at the WORK-ORDER level, not here, so a project has no supervisor of its own.
  */
 export interface Project {
   id: string;
-  particular: string;
+  /** System-generated at creation, e.g. `26-27_0001`. */
+  number: string;
+  name: string;
   clientName: string;
-  /** ISO date for the project. */
-  date: string;
-  /** Generated PO number, e.g. `PO_25-26_06/0001`. */
-  po: string;
-  /** Assigned supervisor's uid, or null until assigned. */
-  supervisorId: string | null;
+  /** The project engineer's name — free text, not a user account. */
+  projectEngineer: string;
+  /** `active` until the admin marks it `completed` (gated on every work order being
+   * `completed` or `cancelled`). */
   status: ProjectStatus;
   /** ISO timestamp. */
   createdAt: string;

@@ -1,7 +1,7 @@
 import { AppError } from '../../utils/AppError';
 import { Clock } from '../../utils/clock';
 import { UserRecord } from '../../models/user';
-import { ProjectRepository } from '../../repositories/projectRepository';
+import { WorkOrderRepository } from '../../repositories/workOrderRepository';
 import { UserRepository } from '../../repositories/userRepository';
 import { SupervisorView, toSupervisorView } from '../../views/supervisorView';
 import { Page, PageQuery } from '../../utils/pagination';
@@ -19,7 +19,7 @@ export interface CreateSupervisorInput {
 export interface SupervisorServiceDeps {
   authAdmin: AuthAdmin;
   userRepository: UserRepository;
-  projectRepository: ProjectRepository;
+  workOrderRepository: WorkOrderRepository;
   inviteEmail: InviteEmailService;
   clock: Clock;
 }
@@ -44,8 +44,6 @@ export class SupervisorService {
     try {
       ({ uid } = await this.deps.authAdmin.createUser({ email, displayName: input.name }));
     } catch (err) {
-      // The email can exist in Firebase Auth without a `users` record (e.g. a prior partial
-      // run); surface that as a clear 409 instead of an opaque 500.
       if ((err as { code?: string }).code === 'auth/email-already-exists') {
         throw new AppError(409, 'A user with this email already exists');
       }
@@ -68,29 +66,29 @@ export class SupervisorService {
 
     await this.deps.inviteEmail.sendSetPasswordEmail(email);
 
-    // A brand-new supervisor has no projects yet.
-    return { ...record, projects: [] };
+    // A brand-new supervisor has no work orders yet.
+    return { ...record, workOrders: [] };
   }
 
-  /** One cursor-paginated page of supervisors, each with the names of their assigned projects. */
+  /** One cursor-paginated page of supervisors, each with the names of their assigned work orders. */
   async list(query: PageQuery = {}): Promise<Page<SupervisorView>> {
     const page = await this.deps.userRepository.listByRole('supervisor', query);
-    const projectsByUid = await this.projectsBySupervisor(page.items.map((s) => s.uid));
+    const workOrdersByUid = await this.workOrdersBySupervisor(page.items.map((s) => s.uid));
     return {
-      items: page.items.map((s) => toSupervisorView(s, projectsByUid)),
+      items: page.items.map((s) => toSupervisorView(s, workOrdersByUid)),
       nextCursor: page.nextCursor,
     };
   }
 
-  /** supervisor uid → names of their assigned projects, scoped to [uids] (one batched query). */
-  private async projectsBySupervisor(uids: string[]): Promise<Map<string, string[]>> {
-    const projects = await this.deps.projectRepository.findBySupervisorIds(uids);
+  /** supervisor uid → names of the work orders assigned to them, scoped to [uids] (one batched query). */
+  private async workOrdersBySupervisor(uids: string[]): Promise<Map<string, string[]>> {
+    const workOrders = await this.deps.workOrderRepository.findBySupervisorIds(uids);
     const byUid = new Map<string, string[]>();
-    for (const p of projects) {
-      if (!p.supervisorId) continue;
-      const names = byUid.get(p.supervisorId) ?? [];
-      names.push(p.particular);
-      byUid.set(p.supervisorId, names);
+    for (const w of workOrders) {
+      if (!w.supervisorId) continue;
+      const names = byUid.get(w.supervisorId) ?? [];
+      names.push(w.name);
+      byUid.set(w.supervisorId, names);
     }
     return byUid;
   }

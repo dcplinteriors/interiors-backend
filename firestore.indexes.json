@@ -1,5 +1,5 @@
 {
-  "_comment": "Composite indexes for cursor-paginated queries. Deploy with `firebase deploy --only firestore:indexes`. Every paginated query orders by (createdAt desc) with the document id (__name__) as a tiebreaker; Firestore sorts __name__ implicitly in the SAME direction as the last field, so createdAt-desc + __name__-desc is the default and needs NO index when there is no filter (the automatic single-field index covers it). Therefore only queries that ALSO filter need a composite index — and __name__ is omitted (it is implicit). On first run against real Firestore, any missing/divergent index surfaces a console link with the exact definition; add it here.",
+  "_comment": "Composite indexes for cursor-paginated queries. Deploy with `firebase deploy --only firestore:indexes`. Every paginated query orders by (createdAt desc) with the document id (__name__) as a tiebreaker; Firestore sorts __name__ implicitly in the SAME direction as the last field, so createdAt-desc + __name__-desc is the default and needs NO index when there is no filter (the automatic single-field index covers it). Therefore only queries that ALSO filter need a composite index — and __name__ is omitted (it is implicit). These cover the common single- and supervisor-scoped filters; rarer multi-filter combos surface a console link with the exact definition on first run — add them here.",
   "indexes": [
     {
       "collectionGroup": "materialRequests",
@@ -21,6 +21,14 @@
       "collectionGroup": "materialRequests",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "workOrder", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materialRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "project", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
@@ -30,7 +38,8 @@
       "collectionGroup": "materialRequests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "orderBy", "order": "ASCENDING" },
+        { "fieldPath": "workOrder", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
@@ -38,16 +47,85 @@
       "collectionGroup": "materialRequests",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "orderBy", "order": "ASCENDING" },
+        { "fieldPath": "supervisorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materialRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "supervisorId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "projects",
+      "collectionGroup": "materialRequests",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "supervisorId", "order": "ASCENDING" },
+        { "fieldPath": "workOrder", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materialRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "supervisorId", "order": "ASCENDING" },
+        { "fieldPath": "project", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "project", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "project", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "supervisorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "supervisorId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "supervisorId", "order": "ASCENDING" },
+        { "fieldPath": "project", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },

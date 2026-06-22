@@ -9,7 +9,7 @@ export function buildUploadRoutes(container: Container): Router {
 
   router.use(authenticate(container.tokenVerifier));
 
-  router.post('/sign', requireRole('supervisor'), controller.sign); // body: { kind, contentType }
+  router.post('/sign', requireRole('supervisor'), controller.sign); // body: { kind, contentType, scope? }
   router.post('/download-url', controller.downloadUrl); // body: { path } — role-scoped inside
 
   return router;

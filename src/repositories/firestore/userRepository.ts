@@ -44,4 +44,13 @@ export class FirestoreUserRepository implements UserRepository {
     const users = snap.docs.map((d) => d.data() as UserRecord);
     return toPage(users, clampLimit(query.limit), (u) => u.uid);
   }
+
+  async update(uid: string, patch: Partial<Omit<UserRecord, 'uid'>>): Promise<UserRecord | null> {
+    const ref = this.col().doc(uid);
+    const existing = await ref.get();
+    if (!existing.exists) return null;
+    await ref.set(patch, { merge: true });
+    const updated = await ref.get();
+    return updated.data() as UserRecord;
+  }
 }

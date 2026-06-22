@@ -2,11 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authOf } from '../utils/requestAuth';
 import { ProjectService } from '../services/project/projectService';
-import {
-  assignSupervisorSchema,
-  createProjectSchema,
-  listProjectsQuerySchema,
-} from '../schemas/project.schema';
+import { createProjectSchema, listProjectsQuerySchema } from '../schemas/project.schema';
 
 export function buildProjectController(service: ProjectService) {
   return {
@@ -18,17 +14,15 @@ export function buildProjectController(service: ProjectService) {
 
     list: asyncHandler(async (req: Request, res: Response) => {
       const query = listProjectsQuerySchema.parse(req.query);
-      res.status(200).json(await service.listForUser(authOf(req), query));
+      res.status(200).json(await service.list(query));
     }),
 
     get: asyncHandler(async (req: Request, res: Response) => {
       res.status(200).json(await service.getForUser(req.params.id, authOf(req)));
     }),
 
-    assign: asyncHandler(async (req: Request, res: Response) => {
-      const { supervisorId } = assignSupervisorSchema.parse(req.body);
-      const project = await service.assignSupervisor(req.params.id, supervisorId);
-      res.status(200).json(project);
+    complete: asyncHandler(async (req: Request, res: Response) => {
+      res.status(200).json(await service.complete(req.params.id));
     }),
   };
 }

@@ -9,11 +9,19 @@ export function buildMaterialRequestRoutes(container: Container): Router {
 
   router.use(authenticate(container.tokenVerifier));
 
-  router.post('/', requireRole('supervisor'), controller.submit); // body: { projectId, items }
+  router.post('/', requireRole('supervisor'), controller.submit); // body: { workOrderId, items }
   router.get('/', controller.list); // role-scoped inside the service
-  router.post('/:id/accept', requireRole('admin'), controller.accept);
+  router.get('/count', controller.count); // role-scoped; e.g. ?status=requested for the badge
+
+  // Admin transitions
+  router.post('/:id/accept', requireRole('admin'), controller.accept); // requested → processing
+  router.post('/:id/assign-vendor', requireRole('admin'), controller.assignVendor); // processing → accepted
   router.post('/:id/decline', requireRole('admin'), controller.decline);
-  router.post('/:id/cancel', requireRole('supervisor'), controller.cancel);
+
+  // Supervisor transitions
+  router.post('/:id/cancel', requireRole('supervisor'), controller.cancel); // requested → cancelled
+  router.post('/:id/close', requireRole('supervisor'), controller.close); // accepted → closed
+  router.post('/:id/return', requireRole('supervisor'), controller.return); // accepted → returned
 
   return router;
 }

@@ -36,4 +36,16 @@ describe('FirebaseStorageService.signUpload', () => {
       service.signUpload({ supervisorUid: 'sup1', kind: 'photo', contentType: 'application/pdf' }),
     ).rejects.toBeInstanceOf(AppError);
   });
+
+  it('rejects a profile-scope upload that is not a photo (400, before Storage)', async () => {
+    const service = new FirebaseStorageService();
+    await expect(
+      service.signUpload({
+        supervisorUid: 'sup1',
+        kind: 'audio',
+        contentType: 'audio/mpeg',
+        scope: 'profile',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
 });

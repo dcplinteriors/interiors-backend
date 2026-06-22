@@ -10,6 +10,8 @@ export interface UserRecord {
   name: string;
   email: string;
   phone?: string;
+  /** Profile image URL (Storage path). Supervisor-editable via PATCH /me; admins have none. */
+  photoUrl?: string | null;
   isActive: boolean;
   /** ISO timestamp. */
   createdAt: string;

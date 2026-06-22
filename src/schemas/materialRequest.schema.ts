@@ -18,23 +18,69 @@ const itemSchema = z.object({
 });
 
 export const submitMaterialRequestSchema = z.object({
-  projectId: id,
-  // Capped to bound per-submission work (each item triggers a Job-number counter write).
+  workOrderId: id,
+  // Capped to bound per-submission work (each item triggers an item-number counter write).
   items: z.array(itemSchema).min(1).max(100),
 });
 
+/** Accept (requested → processing): an optional note only. */
 export const acceptMaterialRequestSchema = z.object({
+  remarks: z.string().trim().optional(),
+});
+
+/** Assign vendor (processing → accepted): supply details. `poNumber` is optional manual text. */
+export const assignVendorSchema = z.object({
   expectedDate: isoDate,
   vendor: nonEmptyString,
+  poNumber: z.string().trim().optional(),
   remarks: z.string().trim().optional(),
 });
 
+/** Decline: a reason is REQUIRED. */
 export const declineMaterialRequestSchema = z.object({
-  remarks: z.string().trim().optional(),
+  remarks: nonEmptyString,
 });
+
+/** Return (accepted → returned): a reason is REQUIRED. */
+export const returnMaterialRequestSchema = z.object({
+  reason: nonEmptyString,
+});
+
+const MATERIAL_REQUEST_STATUSES = [
+  'requested',
+  'processing',
+  'accepted',
+  'closed',
+  'returned',
+  'declined',
+  'cancelled',
+  'superseded',
+] as const;
 
 export const listMaterialRequestQuerySchema = z.object({
-  status: z.enum(['requested', 'accepted', 'declined', 'cancelled']).optional(),
+  status: z.enum(MATERIAL_REQUEST_STATUSES).optional(),
+  workOrder: z.string().optional(),
   project: z.string().optional(),
   ...paginationQuery,
+});
+
+/** Count query — same filters as list, but no pagination (drives the review badge).
+ * `statusIn` is a comma-separated list (e.g. `requested,processing`) for counting several
+ * statuses in one call; when present it takes precedence over `status`. Capped at 10 to stay
+ * within Firestore's `in` limit. */
+export const countMaterialRequestQuerySchema = z.object({
+  status: z.enum(MATERIAL_REQUEST_STATUSES).optional(),
+  statusIn: z
+    .string()
+    .optional()
+    .transform((s) => {
+      const parts = s
+        ?.split(',')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      return parts && parts.length > 0 ? parts : undefined;
+    })
+    .pipe(z.array(z.enum(MATERIAL_REQUEST_STATUSES)).max(10).optional()),
+  workOrder: z.string().optional(),
+  project: z.string().optional(),
 });

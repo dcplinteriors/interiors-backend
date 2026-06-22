@@ -3,7 +3,7 @@ import { getDb } from '../../config/firebase';
 import { Project } from '../../models/project';
 import { clampLimit, Page, PageQuery, toPage } from '../../utils/pagination';
 import { CreateProjectInput, ProjectPatch, ProjectRepository } from '../projectRepository';
-import { byCreatedAtDesc, mapDoc, paged } from './helpers';
+import { mapDoc, paged } from './helpers';
 
 const COLLECTION = 'projects';
 
@@ -36,31 +36,6 @@ export class FirestoreProjectRepository implements ProjectRepository {
     return toPage(snap.docs.map((d) => mapDoc<Project>(d)), clampLimit(query.limit));
   }
 
-  /**
-   * Projects for any of [supervisorIds], batched into Firestore `in` queries (max 10 values
-   * each). Single-field filter, sorted in memory — no composite index needed.
-   */
-  async findBySupervisorIds(supervisorIds: string[]): Promise<Project[]> {
-    const uids = [...new Set(supervisorIds)];
-    if (uids.length === 0) return [];
-    const chunks: string[][] = [];
-    for (let i = 0; i < uids.length; i += 10) chunks.push(uids.slice(i, i + 10));
-    const snaps = await Promise.all(
-      chunks.map((chunk) => this.col().where('supervisorId', 'in', chunk).get()),
-    );
-    return snaps.flatMap((s) => s.docs.map((d) => mapDoc<Project>(d))).sort(byCreatedAtDesc);
-  }
-
-  /**
-   * A supervisor's own projects, cursor-paginated. Requires the
-   * (supervisorId, createdAt desc) composite index.
-   */
-  async listBySupervisor(supervisorId: string, query: PageQuery = {}): Promise<Page<Project>> {
-    const q = this.col().where('supervisorId', '==', supervisorId);
-    const snap = await paged(q, query.limit, query.cursor).get();
-    return toPage(snap.docs.map((d) => mapDoc<Project>(d)), clampLimit(query.limit));
-  }
-
   async update(id: string, patch: ProjectPatch): Promise<Project | null> {
     const ref = this.col().doc(id);
     const existing = await ref.get();
@@ -68,5 +43,21 @@ export class FirestoreProjectRepository implements ProjectRepository {
     await ref.set(patch, { merge: true });
     const updated = await ref.get();
     return mapDoc<Project>(updated);
+  }
+
+  async transition(
+    id: string,
+    decide: (current: Project) => ProjectPatch,
+  ): Promise<Project | null> {
+    const db = getDb();
+    const ref = this.col().doc(id);
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const current = mapDoc<Project>(snap);
+      const patch = decide(current); // validates; throws to abort the transaction
+      tx.set(ref, patch, { merge: true });
+      return { ...current, ...patch };
+    });
   }
 }

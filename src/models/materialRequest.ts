@@ -1,4 +1,12 @@
-export type MaterialRequestStatus = 'requested' | 'accepted' | 'declined' | 'cancelled';
+export type MaterialRequestStatus =
+  | 'requested'
+  | 'processing'
+  | 'accepted'
+  | 'closed'
+  | 'returned'
+  | 'declined'
+  | 'cancelled'
+  | 'superseded';
 
 /** Storage references to uploaded files (the upload itself is the app's responsibility). */
 export interface Attachments {
@@ -9,19 +17,25 @@ export interface Attachments {
 }
 
 /**
- * A single requested item. One material-request form submission creates several of these
- * (one per item) sharing a `batchId`. Each is reviewed independently by an admin.
+ * A single requested item under a work order. One material-request form submission creates
+ * several of these (one per item) sharing a `batchId`. Each is acted on independently.
  */
 export interface MaterialRequest {
   id: string;
-  /** Project id this request belongs to. */
+  /** Generated per item at submit, e.g. `26-27_0001/0001/0001`. */
+  itemNumber: string;
+  /** Parent work order id. */
+  workOrder: string;
+  /** Parent project id (denormalized for filtering / scoping). */
   project: string;
-  /** Requesting supervisor's uid. */
+  /** uid of the supervisor who raised the item — audit only; never changes. */
   orderBy: string;
-  /** Inherited from the project (= project.po). */
-  poNumber: string;
-  /** Generated per item, e.g. `JB_25-26_06/0001`. */
-  jobNumber: string;
+  /**
+   * uid of the work order's CURRENT assigned supervisor — the visibility key. Equals `orderBy`
+   * at submit; updated if the work order is reassigned (so the new supervisor sees the item), and
+   * set to `null` if the work order is unassigned (so nobody sees it). `orderBy` stays for audit.
+   */
+  supervisorId: string | null;
   /** Groups items submitted together in one form submission. */
   batchId: string;
 
@@ -38,8 +52,15 @@ export interface MaterialRequest {
   /** ISO timestamp. */
   createdAt: string;
 
-  // Admin, on acceptance
+  // Admin, when assigning the vendor (processing → accepted) / on decline
   expectedDate?: string | null;
   vendor?: string | null;
+  /** Optional, plain manual PO reference the admin types when assigning the vendor. */
+  poNumber?: string | null;
+  /** Admin note — optional when assigning the vendor; REQUIRED as the decline reason. */
   remarks?: string | null;
+
+  // Supervisor, on return
+  /** Required reason when the supervisor returns an accepted item. */
+  returnReason?: string | null;
 }

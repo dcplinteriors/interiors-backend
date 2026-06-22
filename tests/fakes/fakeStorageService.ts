@@ -12,9 +12,10 @@ export class FakeStorageService implements StorageService {
   async signUpload(input: SignUploadInput): Promise<SignedUpload> {
     this.uploads.push(input);
     const ext = input.kind === 'photo' ? 'jpg' : 'm4a';
+    const prefix = input.scope === 'profile' ? 'profiles' : 'material-requests';
     return {
       uploadUrl: `https://fake-storage/upload/${this.uploads.length}`,
-      path: `material-requests/${input.supervisorUid}/fake-${this.uploads.length}.${ext}`,
+      path: `${prefix}/${input.supervisorUid}/fake-${this.uploads.length}.${ext}`,
     };
   }
 

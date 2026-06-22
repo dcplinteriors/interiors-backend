@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// The backend is the ONLY Storage client — it brokers every upload/read through short-lived
+// signed URLs (which bypass these rules). App clients never touch Storage directly, so all direct
+// client access is denied. Mirrors firestore.rules. See docs/decisions/0004-backend-api-tier.md.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

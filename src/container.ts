@@ -7,15 +7,18 @@ import {
 } from './services/email/inviteEmailService';
 import { UserRepository } from './repositories/userRepository';
 import { ProjectRepository } from './repositories/projectRepository';
+import { WorkOrderRepository } from './repositories/workOrderRepository';
 import { CounterRepository } from './repositories/counterRepository';
 import { MaterialRequestRepository } from './repositories/materialRequestRepository';
 import { FirestoreUserRepository } from './repositories/firestore/userRepository';
 import { FirestoreProjectRepository } from './repositories/firestore/projectRepository';
+import { FirestoreWorkOrderRepository } from './repositories/firestore/workOrderRepository';
 import { FirestoreCounterRepository } from './repositories/firestore/counterRepository';
 import { FirestoreMaterialRequestRepository } from './repositories/firestore/materialRequestRepository';
 import { NumberingService } from './services/numbering/numberingService';
 import { SupervisorService } from './services/supervisor/supervisorService';
 import { ProjectService } from './services/project/projectService';
+import { WorkOrderService } from './services/workOrder/workOrderService';
 import { MaterialRequestService } from './services/materialRequest/materialRequestService';
 import { FirebaseStorageService, StorageService } from './services/storage/storageService';
 
@@ -34,12 +37,14 @@ export interface Container {
   inviteEmail: InviteEmailService;
   userRepository: UserRepository;
   projectRepository: ProjectRepository;
+  workOrderRepository: WorkOrderRepository;
   counterRepository: CounterRepository;
   materialRequestRepository: MaterialRequestRepository;
   // Services
   numberingService: NumberingService;
   supervisorService: SupervisorService;
   projectService: ProjectService;
+  workOrderService: WorkOrderService;
   materialRequestService: MaterialRequestService;
   storageService: StorageService;
 }
@@ -53,6 +58,7 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
   const inviteEmail = overrides.inviteEmail ?? new FirebaseInviteEmailService();
   const userRepository = overrides.userRepository ?? new FirestoreUserRepository();
   const projectRepository = overrides.projectRepository ?? new FirestoreProjectRepository();
+  const workOrderRepository = overrides.workOrderRepository ?? new FirestoreWorkOrderRepository();
   const counterRepository = overrides.counterRepository ?? new FirestoreCounterRepository();
   const materialRequestRepository =
     overrides.materialRequestRepository ?? new FirestoreMaterialRequestRepository();
@@ -60,14 +66,31 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
   const numberingService = overrides.numberingService ?? new NumberingService(counterRepository);
   const supervisorService =
     overrides.supervisorService ??
-    new SupervisorService({ authAdmin, userRepository, projectRepository, inviteEmail, clock });
+    new SupervisorService({ authAdmin, userRepository, workOrderRepository, inviteEmail, clock });
   const projectService =
     overrides.projectService ??
-    new ProjectService({ projectRepository, userRepository, numberingService, clock });
+    new ProjectService({
+      projectRepository,
+      workOrderRepository,
+      userRepository,
+      numberingService,
+      clock,
+    });
+  const workOrderService =
+    overrides.workOrderService ??
+    new WorkOrderService({
+      workOrderRepository,
+      projectRepository,
+      materialRequestRepository,
+      userRepository,
+      numberingService,
+      clock,
+    });
   const materialRequestService =
     overrides.materialRequestService ??
     new MaterialRequestService({
       materialRequestRepository,
+      workOrderRepository,
       projectRepository,
       userRepository,
       numberingService,
@@ -82,11 +105,13 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
     inviteEmail,
     userRepository,
     projectRepository,
+    workOrderRepository,
     counterRepository,
     materialRequestRepository,
     numberingService,
     supervisorService,
     projectService,
+    workOrderService,
     materialRequestService,
     storageService,
   };

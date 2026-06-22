@@ -31,29 +31,25 @@ export class FakeProjectRepository implements ProjectRepository {
   }
 
   async list(query: PageQuery = {}): Promise<Page<Project>> {
-    return paginateSorted(this.sorted([...this.byId.values()]), query.limit, query.cursor);
-  }
-
-  async findBySupervisorIds(supervisorIds: string[]): Promise<Project[]> {
-    const wanted = new Set(supervisorIds);
-    return this.sorted(
-      [...this.byId.values()].filter((p) => p.supervisorId != null && wanted.has(p.supervisorId)),
-    );
-  }
-
-  async listBySupervisor(supervisorId: string, query: PageQuery = {}): Promise<Page<Project>> {
-    const own = this.sorted([...this.byId.values()].filter((p) => p.supervisorId === supervisorId));
-    return paginateSorted(own, query.limit, query.cursor);
-  }
-
-  // Newest-first, mirroring the Firestore repository's ordering (code-unit id tiebreaker).
-  private sorted(items: Project[]): Project[] {
-    return items.sort(byCreatedAtThenIdDesc);
+    const sorted = [...this.byId.values()].sort(byCreatedAtThenIdDesc);
+    return paginateSorted(sorted, query.limit, query.cursor);
   }
 
   async update(id: string, patch: ProjectPatch): Promise<Project | null> {
     const existing = this.byId.get(id);
     if (!existing) return null;
+    const updated = { ...existing, ...patch, id };
+    this.byId.set(id, updated);
+    return updated;
+  }
+
+  async transition(
+    id: string,
+    decide: (current: Project) => ProjectPatch,
+  ): Promise<Project | null> {
+    const existing = this.byId.get(id);
+    if (!existing) return null;
+    const patch = decide(existing); // validates; throws to abort
     const updated = { ...existing, ...patch, id };
     this.byId.set(id, updated);
     return updated;

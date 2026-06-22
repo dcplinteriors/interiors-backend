@@ -41,6 +41,19 @@ describe('POST /api/uploads/sign', () => {
     ]);
   });
 
+  it('returns a profile-image upload URL + path (scope: profile)', async () => {
+    const { app, storageService } = setup(supervisorVerifier('sup7'));
+
+    const res = await request(app)
+      .post('/api/uploads/sign')
+      .set(...bearer())
+      .send({ kind: 'photo', contentType: 'image/jpeg', scope: 'profile' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.path).toMatch(/^profiles\/sup7\//);
+    expect(storageService.uploads[0]).toMatchObject({ scope: 'profile' });
+  });
+
   it('forbids admins (only supervisors upload)', async () => {
     const { app } = setup(adminVerifier);
     const res = await request(app)
@@ -97,6 +110,26 @@ describe('POST /api/uploads/download-url', () => {
       .set(...bearer())
       .send({ path: 'material-requests/anyone/abc.jpg' });
     expect(res.status).toBe(200);
+  });
+
+  it('signs a read URL for the supervisor’s own profile image', async () => {
+    const { app, storageService } = setup(supervisorVerifier('sup7'));
+    const res = await request(app)
+      .post('/api/uploads/download-url')
+      .set(...bearer())
+      .send({ path: 'profiles/sup7/avatar.jpg' });
+
+    expect(res.status).toBe(200);
+    expect(storageService.downloads).toEqual(['profiles/sup7/avatar.jpg']);
+  });
+
+  it('forbids reading another supervisor’s profile image (403)', async () => {
+    const { app } = setup(supervisorVerifier('sup7'));
+    const res = await request(app)
+      .post('/api/uploads/download-url')
+      .set(...bearer())
+      .send({ path: 'profiles/other/avatar.jpg' });
+    expect(res.status).toBe(403);
   });
 
   it('rejects a path outside the attachments prefix — even for an admin (400)', async () => {

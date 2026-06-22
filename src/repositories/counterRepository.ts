@@ -1,11 +1,11 @@
-/** Persistence port for monotonic counters backing PO/Job number generation. */
+/** Persistence port for the monotonic counters backing hierarchical number generation. */
 export interface CounterRepository {
   /**
    * Atomically increments and returns the next value for a (sequence, periodKey) pair.
    * The first call for a given pair returns 1.
    *
-   * @param sequence  e.g. 'po' or 'jb'
-   * @param periodKey e.g. '25-26_06' (financial year + month) — counters reset per period
+   * @param sequence  e.g. `'project'` | `'workOrder'` | `'item'`
+   * @param periodKey the reset scope — a financial year (`26-27`), a projectId, or a workOrderId
    */
   next(sequence: string, periodKey: string): Promise<number>;
 

@@ -3,32 +3,48 @@ import { adminVerifier, buildApp, bearer, supervisorVerifier } from '../helpers/
 import { TokenVerifier } from '../../src/services/auth/tokenVerifier';
 import { FakeMaterialRequestRepository } from '../fakes/fakeMaterialRequestRepository';
 import { FakeProjectRepository } from '../fakes/fakeProjectRepository';
-import { FakeCounterRepository } from '../fakes/fakeCounterRepository';
+import { FakeWorkOrderRepository } from '../fakes/fakeWorkOrderRepository';
 import { FakeUserRepository } from '../fakes/fakeUserRepository';
+import { FakeCounterRepository } from '../fakes/fakeCounterRepository';
 import { Project } from '../../src/models/project';
+import { WorkOrder } from '../../src/models/workOrder';
 import { MaterialRequest } from '../../src/models/materialRequest';
 import { UserRecord } from '../../src/models/user';
 
 const project = (over: Partial<Project> = {}): Project => ({
   id: 'p1',
-  particular: 'Lobby',
+  number: '26-27_0001',
+  name: 'Lobby',
   clientName: 'Acme',
-  date: '2025-06-10',
-  po: 'PO_25-26_06/0001',
+  projectEngineer: 'Eng',
+  status: 'active',
+  createdAt: '2026-06-01T00:00:00.000Z',
+  createdBy: 'admin1',
+  ...over,
+});
+
+const workOrder = (over: Partial<WorkOrder> = {}): WorkOrder => ({
+  id: 'wo1',
+  project: 'p1',
+  number: '26-27_0001/0001',
+  name: 'WO A',
+  date: '2026-06-10',
+  description: null,
   supervisorId: 'sup1',
   status: 'active',
-  createdAt: '2025-06-01T00:00:00.000Z',
+  createdAt: '2026-06-01T00:00:00.000Z',
   createdBy: 'admin1',
   ...over,
 });
 
 const mr = (over: Partial<MaterialRequest> = {}): MaterialRequest => ({
   id: 'mr1',
+  itemNumber: '26-27_0001/0001/0001',
+  workOrder: 'wo1',
   project: 'p1',
   orderBy: 'sup1',
-  poNumber: 'PO_25-26_06/0001',
-  jobNumber: 'JB_25-26_06/0001',
-  batchId: 'batch1',
+  supervisorId: 'sup1',
+  batchId: 'b1',
   particular: 'Hinges',
   make: 'Hettich',
   size: '4 inch',
@@ -36,412 +52,382 @@ const mr = (over: Partial<MaterialRequest> = {}): MaterialRequest => ({
   unit: 'PCS',
   attachments: { photos: [], audio: null },
   status: 'requested',
-  createdAt: '2025-06-10T00:00:00.000Z',
+  createdAt: '2026-06-10T00:00:00.000Z',
   expectedDate: null,
   vendor: null,
+  poNumber: null,
   remarks: null,
+  returnReason: null,
   ...over,
 });
 
-const supervisorRecord = (uid: string, name: string): UserRecord => ({
+const supRecord = (uid: string, name = uid): UserRecord => ({
   uid,
   role: 'supervisor',
   name,
   email: `${uid}@dcpl.test`,
   isActive: true,
-  createdAt: '2025-06-01T00:00:00.000Z',
+  createdAt: '2026-06-01T00:00:00.000Z',
 });
 
 function setup(
   verifier: TokenVerifier,
-  opts: { projects?: Project[]; requests?: MaterialRequest[]; users?: UserRecord[] } = {},
+  opts: {
+    projects?: Project[];
+    workOrders?: WorkOrder[];
+    requests?: MaterialRequest[];
+    users?: UserRecord[];
+  } = {},
 ) {
   const materialRequestRepository = new FakeMaterialRequestRepository(opts.requests ?? []);
-  const projectRepository = new FakeProjectRepository(opts.projects ?? []);
+  const projectRepository = new FakeProjectRepository(opts.projects ?? [project()]);
+  const workOrderRepository = new FakeWorkOrderRepository(opts.workOrders ?? []);
   const userRepository = new FakeUserRepository(opts.users ?? []);
   const counterRepository = new FakeCounterRepository();
   const app = buildApp({
     tokenVerifier: verifier,
     materialRequestRepository,
     projectRepository,
+    workOrderRepository,
     userRepository,
     counterRepository,
   });
   return { app, materialRequestRepository };
 }
 
+const item = (over = {}) => ({
+  particular: 'Hinges',
+  make: 'Hettich',
+  size: '4 inch',
+  quantity: 20,
+  unit: 'PCS',
+  ...over,
+});
+
 describe('POST /api/material-requests (submit)', () => {
-  it('creates one entry per item, with shared batchId, sequential Job numbers, inherited PO', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), { projects: [project()] });
+  it('creates one entry per item under the work order, with item numbers + shared batchId', async () => {
+    const { app } = setup(supervisorVerifier('sup1'), { workOrders: [workOrder()] });
 
     const res = await request(app)
       .post('/api/material-requests')
       .set(...bearer())
-      .send({
-        projectId: 'p1',
-        items: [
-          { particular: 'Hinges', make: 'Hettich', size: '4 inch', quantity: 20, unit: 'PCS' },
-          { particular: 'Screws', make: 'GKW', size: 'M8', quantity: 2.5, unit: 'KG' },
-        ],
-      });
+      .send({ workOrderId: 'wo1', items: [item(), item({ particular: 'Screws', unit: 'KG', quantity: 2.5 })] });
 
     expect(res.status).toBe(201);
     expect(res.body).toHaveLength(2);
     const [a, b] = res.body;
-    expect(a.poNumber).toBe('PO_25-26_06/0001');
-    expect(b.poNumber).toBe('PO_25-26_06/0001');
-    expect(a.jobNumber).toBe('JB_25-26_06/0001');
-    expect(b.jobNumber).toBe('JB_25-26_06/0002');
+    expect(a.itemNumber).toBe('26-27_0001/0001/0001');
+    expect(b.itemNumber).toBe('26-27_0001/0001/0002');
     expect(a.batchId).toBe(b.batchId);
     expect(a.status).toBe('requested');
     expect(a.orderBy).toBe('sup1');
-    expect(a.size).toBe('4 inch'); // per-item material size is persisted
-    // Enriched so the client can show just-submitted rows without a refetch.
-    expect(a.projectName).toBe('Lobby');
+    expect(a.supervisorId).toBe('sup1');
+    expect(a.workOrder).toBe('wo1');
+    expect(a.project).toBe('p1');
+    // Enriched so the client shows just-submitted rows without a refetch.
+    expect(a).toMatchObject({ workOrderName: 'WO A', projectName: 'Lobby', clientName: 'Acme' });
   });
 
-  it('persists the supervisor’s own attachment paths', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), { projects: [project()] });
-    const res = await request(app)
-      .post('/api/material-requests')
-      .set(...bearer())
-      .send({
-        projectId: 'p1',
-        items: [
-          {
-            particular: 'Ply',
-            make: 'Greenply',
-            size: '12mm',
-            quantity: 5,
-            unit: 'SHEET',
-            attachments: {
-              photos: ['material-requests/sup1/a.jpg'],
-              audio: 'material-requests/sup1/note.m4a',
-            },
-          },
-        ],
-      });
-    expect(res.status).toBe(201);
-    expect(res.body[0].attachments).toEqual({
-      photos: ['material-requests/sup1/a.jpg'],
-      audio: 'material-requests/sup1/note.m4a',
-    });
-  });
-
-  it('rejects an attachment path the supervisor does not own (400, writes nothing)', async () => {
+  it('forbids submitting on a work order the supervisor is not assigned to (403, writes nothing)', async () => {
     const { app, materialRequestRepository } = setup(supervisorVerifier('sup1'), {
-      projects: [project()],
+      workOrders: [workOrder({ supervisorId: 'sup2' })],
     });
     const res = await request(app)
       .post('/api/material-requests')
       .set(...bearer())
-      .send({
-        projectId: 'p1',
-        items: [
-          {
-            particular: 'Ply',
-            make: 'Greenply',
-            size: '12mm',
-            quantity: 5,
-            unit: 'SHEET',
-            attachments: { photos: ['material-requests/sup2/stolen.jpg'] },
-          },
-        ],
-      });
-    expect(res.status).toBe(400);
-    expect((await materialRequestRepository.list()).items).toHaveLength(0);
-  });
-
-  it('forbids submitting on a project the supervisor does not own (403, writes nothing)', async () => {
-    const { app, materialRequestRepository } = setup(supervisorVerifier('sup1'), {
-      projects: [project({ supervisorId: 'sup2' })],
-    });
-    const res = await request(app)
-      .post('/api/material-requests')
-      .set(...bearer())
-      .send({ projectId: 'p1', items: [{ particular: 'X', make: 'Y', size: 'S', quantity: 1, unit: 'PCS' }] });
+      .send({ workOrderId: 'wo1', items: [item()] });
     expect(res.status).toBe(403);
     expect((await materialRequestRepository.list()).items).toHaveLength(0);
   });
 
-  it('returns 404 for a missing project (writes nothing)', async () => {
-    const { app, materialRequestRepository } = setup(supervisorVerifier('sup1'), { projects: [] });
+  it('404 for a missing work order', async () => {
+    const { app } = setup(supervisorVerifier('sup1'), { workOrders: [] });
     const res = await request(app)
       .post('/api/material-requests')
       .set(...bearer())
-      .send({ projectId: 'nope', items: [{ particular: 'X', make: 'Y', size: 'S', quantity: 1, unit: 'PCS' }] });
+      .send({ workOrderId: 'nope', items: [item()] });
     expect(res.status).toBe(404);
-    expect((await materialRequestRepository.list()).items).toHaveLength(0);
   });
 
-  it('forbids an admin from submitting (403)', async () => {
-    const { app } = setup(adminVerifier, { projects: [project()] });
+  it('409 when the work order is completed', async () => {
+    const { app } = setup(supervisorVerifier('sup1'), {
+      workOrders: [workOrder({ status: 'completed' })],
+    });
     const res = await request(app)
       .post('/api/material-requests')
       .set(...bearer())
-      .send({ projectId: 'p1', items: [{ particular: 'X', make: 'Y', size: 'S', quantity: 1, unit: 'PCS' }] });
-    expect(res.status).toBe(403);
+      .send({ workOrderId: 'wo1', items: [item()] });
+    expect(res.status).toBe(409);
   });
 
-  it('rejects an empty item list (400)', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), { projects: [project()] });
+  it('409 when the parent project is completed', async () => {
+    const { app } = setup(supervisorVerifier('sup1'), {
+      projects: [project({ status: 'completed' })],
+      workOrders: [workOrder()],
+    });
     const res = await request(app)
       .post('/api/material-requests')
       .set(...bearer())
-      .send({ projectId: 'p1', items: [] });
-    expect(res.status).toBe(400);
+      .send({ workOrderId: 'wo1', items: [item()] });
+    expect(res.status).toBe(409);
   });
 
-  it('rejects more than 3 photos (400)', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), { projects: [project()] });
+  it('rejects a foreign attachment path (400, writes nothing)', async () => {
+    const { app, materialRequestRepository } = setup(supervisorVerifier('sup1'), {
+      workOrders: [workOrder()],
+    });
     const res = await request(app)
       .post('/api/material-requests')
       .set(...bearer())
       .send({
-        projectId: 'p1',
-        items: [
-          {
-            particular: 'X',
-            make: 'Y',
-            size: 'S',
-            quantity: 1,
-            unit: 'PCS',
-            attachments: { photos: ['a', 'b', 'c', 'd'] },
-          },
-        ],
+        workOrderId: 'wo1',
+        items: [item({ attachments: { photos: ['material-requests/sup2/stolen.jpg'] } })],
       });
     expect(res.status).toBe(400);
+    expect((await materialRequestRepository.list()).items).toHaveLength(0);
+  });
+
+  it('rejects an empty item list (400) and forbids an admin (403)', async () => {
+    const empty = await request(setup(supervisorVerifier('sup1'), { workOrders: [workOrder()] }).app)
+      .post('/api/material-requests')
+      .set(...bearer())
+      .send({ workOrderId: 'wo1', items: [] });
+    expect(empty.status).toBe(400);
+
+    const admin = await request(setup(adminVerifier, { workOrders: [workOrder()] }).app)
+      .post('/api/material-requests')
+      .set(...bearer())
+      .send({ workOrderId: 'wo1', items: [item()] });
+    expect(admin.status).toBe(403);
   });
 });
 
 describe('GET /api/material-requests (list)', () => {
-  it('returns all for admin and supports status filter', async () => {
-    const { app } = setup(adminVerifier, {
-      requests: [mr({ id: 'mr1' }), mr({ id: 'mr2', status: 'accepted' })],
-    });
-
-    const all = await request(app).get('/api/material-requests').set(...bearer());
-    expect(all.body.items).toHaveLength(2);
-    expect(all.body.nextCursor).toBeNull();
-
-    const requested = await request(app)
-      .get('/api/material-requests?status=requested')
-      .set(...bearer());
-    expect(requested.body.items).toHaveLength(1);
-  });
-
-  it('paginates with limit + cursor (newest-first, no overlap)', async () => {
-    const { app } = setup(adminVerifier, {
+  it('returns all for admin with status + work-order filters; only visible ones for a supervisor', async () => {
+    const opts = {
       requests: [
-        mr({ id: 'mr1', createdAt: '2025-06-05T00:00:00.000Z' }),
-        mr({ id: 'mr2', createdAt: '2025-06-04T00:00:00.000Z' }),
-        mr({ id: 'mr3', createdAt: '2025-06-03T00:00:00.000Z' }),
+        mr({ id: 'mr1', workOrder: 'wo1', supervisorId: 'sup1', status: 'requested' }),
+        mr({ id: 'mr2', workOrder: 'wo2', supervisorId: 'sup1', status: 'accepted' }),
+        mr({ id: 'mr3', workOrder: 'wo1', supervisorId: 'sup2', status: 'requested' }),
       ],
-    });
-
-    const page1 = await request(app).get('/api/material-requests?limit=2').set(...bearer());
-    expect(page1.body.items).toHaveLength(2);
-    expect(page1.body.nextCursor).toBeTruthy();
-
-    const page2 = await request(app)
-      .get(`/api/material-requests?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`)
+    };
+    const all = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests')
       .set(...bearer());
-    expect(page2.body.items).toHaveLength(1);
-    expect(page2.body.nextCursor).toBeNull();
+    expect(all.body.items).toHaveLength(3);
 
-    const ids = [...page1.body.items, ...page2.body.items].map((r: { id: string }) => r.id);
-    expect(new Set(ids).size).toBe(3); // no duplicate rows across pages
+    const accepted = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests?status=accepted')
+      .set(...bearer());
+    expect(accepted.body.items.map((r: { id: string }) => r.id)).toEqual(['mr2']);
+
+    const byWo = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests?workOrder=wo1')
+      .set(...bearer());
+    expect(byWo.body.items.map((r: { id: string }) => r.id).sort()).toEqual(['mr1', 'mr3']);
+
+    // Supervisor sees only items whose CURRENT supervisorId is theirs.
+    const mine = await request(setup(supervisorVerifier('sup1'), opts).app)
+      .get('/api/material-requests')
+      .set(...bearer());
+    expect(mine.body.items.map((r: { id: string }) => r.id).sort()).toEqual(['mr1', 'mr2']);
   });
 
-  it('pages cleanly across a batch boundary (rows sharing one createdAt)', async () => {
-    // A multi-item submission gives every item the same createdAt — the id tiebreaker must
-    // keep the cursor stable so no row is dropped or duplicated when a page splits the batch.
-    const at = '2025-06-05T00:00:00.000Z';
+  it('resolves work-order/project/client/supervisor names', async () => {
     const { app } = setup(adminVerifier, {
-      requests: [
-        mr({ id: 'mrA', createdAt: at }),
-        mr({ id: 'mrB', createdAt: at }),
-        mr({ id: 'mrC', createdAt: at }),
-      ],
-    });
-
-    const page1 = await request(app).get('/api/material-requests?limit=2').set(...bearer());
-    const page2 = await request(app)
-      .get(`/api/material-requests?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`)
-      .set(...bearer());
-
-    const ids = [...page1.body.items, ...page2.body.items].map((r: { id: string }) => r.id);
-    expect(ids).toHaveLength(3);
-    expect(new Set(ids)).toEqual(new Set(['mrA', 'mrB', 'mrC'])); // all present, none duplicated
-    expect(page2.body.nextCursor).toBeNull();
-  });
-
-  it('returns only own requests for a supervisor', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), {
-      requests: [mr({ id: 'mr1', orderBy: 'sup1' }), mr({ id: 'mr2', orderBy: 'sup2' })],
-    });
-    const res = await request(app).get('/api/material-requests').set(...bearer());
-    expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].orderBy).toBe('sup1');
-    expect(res.body.nextCursor).toBeNull();
-  });
-
-  it('paginates and status-filters a supervisor’s own requests (server-side)', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), {
-      requests: [
-        mr({ id: 'mr1', orderBy: 'sup1', status: 'requested', createdAt: '2025-06-01T00:00:00.000Z' }),
-        mr({ id: 'mr2', orderBy: 'sup1', status: 'accepted', createdAt: '2025-06-02T00:00:00.000Z' }),
-        mr({ id: 'mr3', orderBy: 'sup1', status: 'requested', createdAt: '2025-06-03T00:00:00.000Z' }),
-        mr({ id: 'other', orderBy: 'sup2', status: 'requested', createdAt: '2025-06-04T00:00:00.000Z' }),
-      ],
-    });
-
-    // Status filter is applied server-side, scoped to the caller.
-    const requested = await request(app).get('/api/material-requests?status=requested').set(...bearer());
-    expect(requested.body.items.map((r: { id: string }) => r.id)).toEqual(['mr3', 'mr1']);
-
-    // Cursor pagination over the caller's own requests.
-    const page1 = await request(app).get('/api/material-requests?limit=1').set(...bearer());
-    expect(page1.body.items.map((r: { id: string }) => r.id)).toEqual(['mr3']);
-    expect(page1.body.nextCursor).toBeTruthy();
-    const page2 = await request(app)
-      .get(`/api/material-requests?limit=1&cursor=${encodeURIComponent(page1.body.nextCursor)}`)
-      .set(...bearer());
-    expect(page2.body.items.map((r: { id: string }) => r.id)).toEqual(['mr2']);
-  });
-
-  it('resolves projectName + clientName (from project) and supervisorName (from orderBy)', async () => {
-    const { app } = setup(adminVerifier, {
-      requests: [mr({ id: 'mr1', project: 'p1', orderBy: 'sup1' })],
-      projects: [project({ id: 'p1', particular: 'Lobby', clientName: 'Acme' })],
-      users: [supervisorRecord('sup1', 'Ravi')],
+      requests: [mr({ id: 'mr1' })],
+      workOrders: [workOrder()],
+      users: [supRecord('sup1', 'Ravi')],
     });
     const res = await request(app).get('/api/material-requests').set(...bearer());
     expect(res.body.items[0]).toMatchObject({
+      workOrderName: 'WO A',
+      workOrderNumber: '26-27_0001/0001',
       projectName: 'Lobby',
       clientName: 'Acme',
       supervisorName: 'Ravi',
     });
   });
+});
 
-  it('falls back to null names when the refs are unknown', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1' })] });
-    const res = await request(app).get('/api/material-requests').set(...bearer());
-    expect(res.body.items[0]).toMatchObject({
-      projectName: null,
-      clientName: null,
-      supervisorName: null,
-    });
+describe('GET /api/material-requests/count', () => {
+  const opts = {
+    requests: [
+      mr({ id: 'mr1', supervisorId: 'sup1', status: 'requested' }),
+      mr({ id: 'mr2', supervisorId: 'sup1', status: 'accepted' }),
+      mr({ id: 'mr3', supervisorId: 'sup2', status: 'requested' }),
+    ],
+  };
+
+  it('admin counts all items matching the status filter', async () => {
+    const res = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests/count?status=requested')
+      .set(...bearer());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ count: 2 });
+  });
+
+  it('with no filter counts everything', async () => {
+    const res = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests/count')
+      .set(...bearer());
+    expect(res.body).toEqual({ count: 3 });
+  });
+
+  it('a supervisor counts only their own visible items', async () => {
+    const res = await request(setup(supervisorVerifier('sup1'), opts).app)
+      .get('/api/material-requests/count?status=requested')
+      .set(...bearer());
+    expect(res.body).toEqual({ count: 1 });
+  });
+
+  it('statusIn counts several statuses in one call', async () => {
+    const res = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests/count?statusIn=requested,accepted')
+      .set(...bearer());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ count: 3 }); // mr1 + mr3 (requested) + mr2 (accepted)
+  });
+
+  it('statusIn takes precedence over status, and stays supervisor-scoped', async () => {
+    const res = await request(setup(supervisorVerifier('sup1'), opts).app)
+      .get('/api/material-requests/count?statusIn=requested,accepted&status=closed')
+      .set(...bearer());
+    expect(res.body).toEqual({ count: 2 }); // sup1's mr1 (requested) + mr2 (accepted)
+  });
+
+  it('rejects an invalid status in statusIn', async () => {
+    const res = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests/count?statusIn=requested,bogus')
+      .set(...bearer());
+    expect(res.status).toBe(400);
   });
 });
 
-describe('POST /api/material-requests/:id/accept', () => {
-  it('admin accepts a requested item with supply details', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1' })] });
+describe('admin acceptance flow (accept → assign-vendor)', () => {
+  it('accept moves requested → processing', async () => {
+    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'requested' })] });
+    const res = await request(app).post('/api/material-requests/mr1/accept').set(...bearer()).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('processing');
+  });
+
+  it('assign-vendor moves processing → accepted with supply details', async () => {
+    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'processing' })] });
     const res = await request(app)
-      .post('/api/material-requests/mr1/accept')
+      .post('/api/material-requests/mr1/assign-vendor')
       .set(...bearer())
-      .send({ expectedDate: '2025-06-20', vendor: 'Steel Co', remarks: 'urgent' });
+      .send({ expectedDate: '2026-06-20', vendor: 'Steel Co', poNumber: 'PO-9', remarks: 'urgent' });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       status: 'accepted',
-      expectedDate: '2025-06-20',
+      expectedDate: '2026-06-20',
       vendor: 'Steel Co',
+      poNumber: 'PO-9',
       remarks: 'urgent',
     });
   });
 
-  it('accepts without remarks, storing remarks as null', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1' })] });
+  it('409 assigning a vendor before acceptance (still requested)', async () => {
+    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'requested' })] });
     const res = await request(app)
-      .post('/api/material-requests/mr1/accept')
+      .post('/api/material-requests/mr1/assign-vendor')
       .set(...bearer())
-      .send({ expectedDate: '2025-06-20', vendor: 'Steel Co' });
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('accepted');
-    expect(res.body.remarks).toBeNull();
-  });
-
-  it('rejects accepting an already-decided request (409)', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'accepted' })] });
-    const res = await request(app)
-      .post('/api/material-requests/mr1/accept')
-      .set(...bearer())
-      .send({ expectedDate: '2025-06-20', vendor: 'Steel Co' });
+      .send({ expectedDate: '2026-06-20', vendor: 'Steel Co' });
     expect(res.status).toBe(409);
   });
 
-  it('returns 404 for a missing request', async () => {
-    const { app } = setup(adminVerifier, { requests: [] });
-    const res = await request(app)
-      .post('/api/material-requests/nope/accept')
-      .set(...bearer())
-      .send({ expectedDate: '2025-06-20', vendor: 'Steel Co' });
-    expect(res.status).toBe(404);
-  });
-
-  it('forbids a supervisor from accepting (403)', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1' })] });
-    const res = await request(app)
+  it('409 accepting an already-processing item; 404 for a missing item; 403 for a supervisor', async () => {
+    const dup = await request(setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'processing' })] }).app)
       .post('/api/material-requests/mr1/accept')
       .set(...bearer())
-      .send({ expectedDate: '2025-06-20', vendor: 'Steel Co' });
-    expect(res.status).toBe(403);
+      .send({});
+    expect(dup.status).toBe(409);
+
+    const missing = await request(setup(adminVerifier, { requests: [] }).app)
+      .post('/api/material-requests/nope/accept')
+      .set(...bearer())
+      .send({});
+    expect(missing.status).toBe(404);
+
+    const sup = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1' })] }).app)
+      .post('/api/material-requests/mr1/accept')
+      .set(...bearer())
+      .send({});
+    expect(sup.status).toBe(403);
   });
 });
 
 describe('POST /api/material-requests/:id/decline', () => {
-  it('admin declines a requested item with a reason', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1' })] });
-    const res = await request(app)
+  it('declines from requested or processing with a required reason', async () => {
+    const fromRequested = await request(setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'requested' })] }).app)
       .post('/api/material-requests/mr1/decline')
       .set(...bearer())
       .send({ remarks: 'out of budget' });
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: 'declined', remarks: 'out of budget' });
-  });
+    expect(fromRequested.body).toMatchObject({ status: 'declined', remarks: 'out of budget' });
 
-  it('rejects declining a non-requested item (409)', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'cancelled' })] });
-    const res = await request(app)
+    const fromProcessing = await request(setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'processing' })] }).app)
       .post('/api/material-requests/mr1/decline')
       .set(...bearer())
-      .send({});
-    expect(res.status).toBe(409);
+      .send({ remarks: 'no vendor' });
+    expect(fromProcessing.body.status).toBe('declined');
+  });
+
+  it('400 when no reason is given', async () => {
+    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1' })] });
+    const res = await request(app).post('/api/material-requests/mr1/decline').set(...bearer()).send({});
+    expect(res.status).toBe(400);
   });
 });
 
-describe('POST /api/material-requests/:id/cancel', () => {
-  it('lets the owning supervisor cancel a requested item, keeping the resolved names', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), {
-      requests: [mr({ id: 'mr1', orderBy: 'sup1', project: 'p1' })],
-      projects: [project({ id: 'p1', particular: 'Lobby' })],
-    });
-    const res = await request(app).post('/api/material-requests/mr1/cancel').set(...bearer());
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('cancelled');
-    // Enriched so the optimistic in-place row update doesn't drop the project name.
-    expect(res.body.projectName).toBe('Lobby');
+describe('supervisor transitions (cancel / close / return)', () => {
+  it('cancel: owner cancels a requested item; 403 for a non-owner; 409 once not requested', async () => {
+    const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', orderBy: 'sup1', status: 'requested' })], workOrders: [workOrder()] }).app)
+      .post('/api/material-requests/mr1/cancel')
+      .set(...bearer());
+    expect(ok.body.status).toBe('cancelled');
+
+    const other = await request(setup(supervisorVerifier('sup9'), { requests: [mr({ id: 'mr1', orderBy: 'sup1', supervisorId: 'sup9', status: 'requested' })] }).app)
+      .post('/api/material-requests/mr1/cancel')
+      .set(...bearer());
+    expect(other.status).toBe(403); // not the owner (orderBy)
+
+    const late = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', orderBy: 'sup1', status: 'processing' })] }).app)
+      .post('/api/material-requests/mr1/cancel')
+      .set(...bearer());
+    expect(late.status).toBe(409);
   });
 
-  it("forbids cancelling another supervisor's request (403)", async () => {
-    const { app } = setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', orderBy: 'sup2' })] });
-    const res = await request(app).post('/api/material-requests/mr1/cancel').set(...bearer());
-    expect(res.status).toBe(403);
+  it('close: the assigned supervisor closes an accepted item; 409 if not accepted; 403 for a non-assignee', async () => {
+    const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
+      .post('/api/material-requests/mr1/close')
+      .set(...bearer());
+    expect(ok.body.status).toBe('closed');
+
+    const notAccepted = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'requested' })] }).app)
+      .post('/api/material-requests/mr1/close')
+      .set(...bearer());
+    expect(notAccepted.status).toBe(409);
+
+    const notAssignee = await request(setup(supervisorVerifier('sup9'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })] }).app)
+      .post('/api/material-requests/mr1/close')
+      .set(...bearer());
+    expect(notAssignee.status).toBe(403);
   });
 
-  it('rejects cancelling a non-requested item (409)', async () => {
-    const { app } = setup(supervisorVerifier('sup1'), {
-      requests: [mr({ id: 'mr1', orderBy: 'sup1', status: 'accepted' })],
-    });
-    const res = await request(app).post('/api/material-requests/mr1/cancel').set(...bearer());
-    expect(res.status).toBe(409);
-  });
+  it('return: the assigned supervisor returns an accepted item with a required reason', async () => {
+    const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
+      .post('/api/material-requests/mr1/return')
+      .set(...bearer())
+      .send({ reason: 'wrong size' });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ status: 'returned', returnReason: 'wrong size' });
 
-  it('forbids an admin from cancelling (403)', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1' })] });
-    const res = await request(app).post('/api/material-requests/mr1/cancel').set(...bearer());
-    expect(res.status).toBe(403);
+    const noReason = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })] }).app)
+      .post('/api/material-requests/mr1/return')
+      .set(...bearer())
+      .send({});
+    expect(noReason.status).toBe(400);
   });
 });
 

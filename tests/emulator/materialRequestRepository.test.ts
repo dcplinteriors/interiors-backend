@@ -5,10 +5,11 @@ import { CreateMaterialRequestInput } from '../../src/repositories/materialReque
 const repo = new FirestoreMaterialRequestRepository();
 
 const input = (over: Partial<CreateMaterialRequestInput> = {}): CreateMaterialRequestInput => ({
+  itemNumber: '26-27_0001/0001/0001',
+  workOrder: 'wo1',
   project: 'p1',
   orderBy: 'sup1',
-  poNumber: 'PO_25-26_06/0001',
-  jobNumber: 'JB_25-26_06/0001',
+  supervisorId: 'sup1',
   batchId: 'batch1',
   particular: 'Hinges',
   make: 'Hettich',
@@ -17,10 +18,12 @@ const input = (over: Partial<CreateMaterialRequestInput> = {}): CreateMaterialRe
   unit: 'PCS',
   attachments: { photos: [], audio: null },
   status: 'requested',
-  createdAt: '2025-06-10T00:00:00.000Z',
+  createdAt: '2026-06-10T00:00:00.000Z',
   expectedDate: null,
   vendor: null,
+  poNumber: null,
   remarks: null,
+  returnReason: null,
   ...over,
 });
 
@@ -34,27 +37,54 @@ describe('FirestoreMaterialRequestRepository (emulator)', () => {
     expect(await repo.findById(created[0].id)).toMatchObject({ particular: 'A' });
   });
 
-  it('lists with status and project filters, newest-first', async () => {
+  it('lists with status, project, and work-order filters, newest-first', async () => {
     await repo.createMany([
-      input({ project: 'p1', status: 'requested', createdAt: '2025-06-01T00:00:00.000Z' }),
-      input({ project: 'p1', status: 'accepted', createdAt: '2025-06-05T00:00:00.000Z' }),
-      input({ project: 'p2', status: 'requested', createdAt: '2025-06-03T00:00:00.000Z' }),
+      input({ workOrder: 'wo1', project: 'p1', status: 'requested', createdAt: '2026-06-01T00:00:00.000Z' }),
+      input({ workOrder: 'wo1', project: 'p1', status: 'accepted', createdAt: '2026-06-05T00:00:00.000Z' }),
+      input({ workOrder: 'wo2', project: 'p2', status: 'requested', createdAt: '2026-06-03T00:00:00.000Z' }),
     ]);
 
     expect((await repo.list()).items).toHaveLength(3);
     expect((await repo.list({ status: 'requested' })).items).toHaveLength(2);
     expect((await repo.list({ project: 'p1' })).items).toHaveLength(2);
-    expect((await repo.list({ project: 'p1', status: 'accepted' })).items).toHaveLength(1);
+    expect((await repo.list({ workOrder: 'wo1' })).items).toHaveLength(2);
+    expect((await repo.list({ workOrder: 'wo1', status: 'accepted' })).items).toHaveLength(1);
 
-    const p1 = (await repo.list({ project: 'p1' })).items;
-    expect(p1[0].createdAt > p1[1].createdAt).toBe(true); // newest-first
+    const wo1 = (await repo.list({ workOrder: 'wo1' })).items;
+    expect(wo1[0].createdAt > wo1[1].createdAt).toBe(true); // newest-first
+  });
+
+  it('counts with filters, and scopes by supervisor', async () => {
+    await repo.createMany([
+      input({ supervisorId: 'sup1', status: 'requested' }),
+      input({ supervisorId: 'sup1', status: 'accepted' }),
+      input({ supervisorId: 'sup2', status: 'requested' }),
+    ]);
+
+    expect(await repo.count()).toBe(3);
+    expect(await repo.count({ status: 'requested' })).toBe(2);
+    expect(await repo.count({ statusIn: ['requested', 'accepted'] })).toBe(3);
+    expect(await repo.countBySupervisor('sup1')).toBe(2);
+    expect(await repo.countBySupervisor('sup1', { status: 'requested' })).toBe(1);
+    expect(
+      await repo.countBySupervisor('sup1', { statusIn: ['requested', 'accepted'] }),
+    ).toBe(2);
+  });
+
+  it('finds all items on a work order', async () => {
+    await repo.createMany([
+      input({ workOrder: 'wo1' }),
+      input({ workOrder: 'wo1' }),
+      input({ workOrder: 'wo2' }),
+    ]);
+    expect(await repo.findByWorkOrder('wo1')).toHaveLength(2);
   });
 
   it('paginates with a cursor (newest-first, no overlap)', async () => {
     await repo.createMany([
-      input({ createdAt: '2025-06-05T00:00:00.000Z' }),
-      input({ createdAt: '2025-06-04T00:00:00.000Z' }),
-      input({ createdAt: '2025-06-03T00:00:00.000Z' }),
+      input({ createdAt: '2026-06-05T00:00:00.000Z' }),
+      input({ createdAt: '2026-06-04T00:00:00.000Z' }),
+      input({ createdAt: '2026-06-03T00:00:00.000Z' }),
     ]);
 
     const first = await repo.list({ limit: 2 });
@@ -69,11 +99,67 @@ describe('FirestoreMaterialRequestRepository (emulator)', () => {
     expect(new Set(ids).size).toBe(3); // no duplicates across pages
   });
 
-  it('lists only a supervisor’s requests', async () => {
-    await repo.createMany([input({ orderBy: 'sup1' }), input({ orderBy: 'sup2' })]);
+  it('lists only a supervisor’s visible requests (by current supervisorId)', async () => {
+    await repo.createMany([input({ supervisorId: 'sup1' }), input({ supervisorId: 'sup2' })]);
     const own = await repo.listBySupervisor('sup1');
     expect(own.items).toHaveLength(1);
-    expect(own.items[0].orderBy).toBe('sup1');
+    expect(own.items[0].supervisorId).toBe('sup1');
+  });
+
+  it(
+    'updateMany applies more than the 500-op batch limit (chunked)',
+    async () => {
+      const inputs = Array.from({ length: 520 }, () => input({ workOrder: 'big' }));
+      // Seed in <=500 chunks (createMany is itself a single batch).
+      await repo.createMany(inputs.slice(0, 260));
+      await repo.createMany(inputs.slice(260));
+      const before = await repo.findByWorkOrder('big');
+      expect(before).toHaveLength(520);
+
+      await repo.updateMany(before.map((r) => ({ id: r.id, patch: { supervisorId: 'newSup' } })));
+
+      const after = await repo.findByWorkOrder('big');
+      expect(after).toHaveLength(520);
+      expect(after.every((r) => r.supervisorId === 'newSup')).toBe(true);
+    },
+    30000,
+  );
+
+  it('transition reads/decides/writes atomically and aborts cleanly on a thrown decision', async () => {
+    const [created] = await repo.createMany([input({ status: 'requested' })]);
+
+    const updated = await repo.transition(created.id, (cur) => {
+      expect(cur.status).toBe('requested');
+      return { status: 'processing' };
+    });
+    expect(updated?.status).toBe('processing');
+
+    // A decision that throws aborts the transaction — nothing is written.
+    await expect(
+      repo.transition(created.id, () => {
+        throw new Error('nope');
+      }),
+    ).rejects.toThrow('nope');
+    expect((await repo.findById(created.id))?.status).toBe('processing'); // unchanged
+
+    expect(await repo.transition('missing', () => ({ status: 'closed' }))).toBeNull();
+  });
+
+  it('serializes two concurrent transitions on the same item — exactly one wins', async () => {
+    const [created] = await repo.createMany([input({ status: 'requested' })]);
+
+    // Both try to leave `requested`; the transaction that loses the race re-reads the new status
+    // and its from-check throws, so only one commits.
+    const fromRequested = (to: 'processing' | 'declined') =>
+      repo.transition(created.id, (cur) => {
+        if (cur.status !== 'requested') throw new Error(`already ${cur.status}`);
+        return { status: to };
+      });
+
+    const results = await Promise.allSettled([fromRequested('processing'), fromRequested('declined')]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    expect(['processing', 'declined']).toContain((await repo.findById(created.id))?.status);
   });
 
   it('merges status + admin fields on update', async () => {
@@ -81,7 +167,7 @@ describe('FirestoreMaterialRequestRepository (emulator)', () => {
     const updated = await repo.update(created.id, {
       status: 'accepted',
       vendor: 'Steel Co',
-      expectedDate: '2025-06-20',
+      expectedDate: '2026-06-20',
     });
     expect(updated).toMatchObject({
       id: created.id,
