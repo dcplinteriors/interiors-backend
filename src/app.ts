@@ -1,6 +1,7 @@
 import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import pinoHttp from 'pino-http';
 import { Container, createContainer } from './container';
 import { corsOptions } from './config/cors';
@@ -13,14 +14,17 @@ import { errorHandler } from './middlewares/errorHandler';
  * Builds the Express app from a container (no listener) — so tests can inject fakes
  * and `server.ts` can own the process lifecycle.
  *
- * Middleware order: security headers → CORS → request logging → body parsing →
- * routes → 404 → error handler.
+ * Middleware order: security headers → CORS → response compression → request logging →
+ * body parsing → routes → 404 → error handler.
  */
 export function createApp(container: Container = createContainer()): Express {
   const app = express();
 
   app.use(helmet());
   app.use(cors(corsOptions()));
+  // gzip JSON responses — Cloud Run doesn't compress for us. Big win for list
+  // endpoints over mobile networks; negligible cost for the small ones.
+  app.use(compression());
   app.use(
     pinoHttp({
       logger,

@@ -22,10 +22,14 @@ const schema = z.object({
   // Firebase config is optional in dev/test (emulator), but must be present in production —
   // fail loudly at startup instead of 500-ing on the first real request.
   if (val.NODE_ENV !== 'production') return;
-  if (!val.FIREBASE_SERVICE_ACCOUNT && !val.GOOGLE_APPLICATION_CREDENTIALS) {
+  // On Cloud Run (K_SERVICE is set) the attached service account provides
+  // Application Default Credentials automatically — no explicit creds needed.
+  const onCloudRun = Boolean(process.env.K_SERVICE);
+  if (!onCloudRun && !val.FIREBASE_SERVICE_ACCOUNT && !val.GOOGLE_APPLICATION_CREDENTIALS) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Set FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS in production',
+      message:
+        'Set FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS in production (or deploy on Cloud Run for ADC)',
       path: ['FIREBASE_SERVICE_ACCOUNT'],
     });
   }

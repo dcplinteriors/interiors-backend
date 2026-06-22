@@ -1,10 +1,24 @@
 import { app } from './app';
 import { env } from './config/env';
 import { logger } from './utils/logger';
+import { getDb } from './config/firebase';
 
 const server = app.listen(env.PORT, () => {
   logger.info(`DCPL backend listening on port ${env.PORT} (${env.NODE_ENV})`);
 });
+
+// Warm the Firestore gRPC channel during startup (and on every new instance Cloud Run
+// spins up) so the FIRST real request doesn't pay connection-setup latency. Fire-and-forget
+// so it never blocks readiness; skip in the emulator/tests. A failure here is non-fatal —
+// the next request will just initialise lazily as before.
+if (env.NODE_ENV === 'production' && !process.env.FIRESTORE_EMULATOR_HOST) {
+  getDb()
+    .collection('_warmup')
+    .limit(1)
+    .get()
+    .then(() => logger.info('Firestore connection warmed'))
+    .catch((err) => logger.warn({ err }, 'Firestore warmup failed (non-fatal)'));
+}
 
 // Graceful shutdown — let in-flight requests finish before exit (important on Cloud Run/k8s).
 let shuttingDown = false;
