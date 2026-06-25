@@ -79,6 +79,41 @@ describe('FakeProjectRepository', () => {
     expect(items).toHaveLength(2);
     expect(items[0].createdAt > items[1].createdAt).toBe(true);
   });
+
+  it('createWithWorkOrders persists the project and its work orders together', async () => {
+    const workOrders = new FakeWorkOrderRepository();
+    const repo = new FakeProjectRepository([], workOrders);
+
+    const { project, workOrders: created } = await repo.createWithWorkOrders(
+      projectInput(),
+      async (projectId) => [
+        workOrderInput({ project: projectId, name: 'Civil' }),
+        workOrderInput({ project: projectId, name: 'Electrical' }),
+      ],
+    );
+
+    expect(await repo.findById(project.id)).toEqual(project);
+    expect(created).toHaveLength(2);
+    expect((await workOrders.findByProject(project.id)).map((w) => w.name).sort()).toEqual([
+      'Civil',
+      'Electrical',
+    ]);
+  });
+
+  it('createWithWorkOrders writes nothing if building the work orders fails (atomicity)', async () => {
+    const workOrders = new FakeWorkOrderRepository();
+    const repo = new FakeProjectRepository([], workOrders);
+
+    await expect(
+      repo.createWithWorkOrders(projectInput(), async () => {
+        throw new Error('numbering failed'); // e.g. a counter write blew up
+      }),
+    ).rejects.toThrow('numbering failed');
+
+    // No orphan: the project must not have been persisted without its work orders.
+    expect((await repo.list()).items).toHaveLength(0);
+    expect((await workOrders.findByProject('proj_1')).length).toBe(0);
+  });
 });
 
 describe('FakeWorkOrderRepository', () => {

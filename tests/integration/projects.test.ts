@@ -38,8 +38,9 @@ function setup(
   verifier: TokenVerifier = adminVerifier,
   opts: { projects?: Project[]; workOrders?: WorkOrder[] } = {},
 ) {
-  const projectRepository = new FakeProjectRepository(opts.projects ?? []);
   const workOrderRepository = new FakeWorkOrderRepository(opts.workOrders ?? []);
+  // Project creation writes the project + its work orders atomically into the same WO store.
+  const projectRepository = new FakeProjectRepository(opts.projects ?? [], workOrderRepository);
   const counterRepository = new FakeCounterRepository();
   // Inject a fake user repo — the project-detail endpoint resolves supervisor
   // names via userRepository.findByUids(). Without this it falls through to the

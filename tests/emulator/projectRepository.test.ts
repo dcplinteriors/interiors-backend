@@ -1,8 +1,24 @@
 import { FirestoreProjectRepository } from '../../src/repositories/firestore/projectRepository';
+import { FirestoreWorkOrderRepository } from '../../src/repositories/firestore/workOrderRepository';
 import { clearFirestore } from './helpers';
 import { CreateProjectInput } from '../../src/repositories/projectRepository';
+import { CreateWorkOrderInput } from '../../src/repositories/workOrderRepository';
 
 const repo = new FirestoreProjectRepository();
+const workOrders = new FirestoreWorkOrderRepository();
+
+const woInput = (over: Partial<CreateWorkOrderInput> = {}): CreateWorkOrderInput => ({
+  project: 'set-by-callback',
+  number: '26-27_0001/0001',
+  name: 'WO',
+  date: '2026-06-10',
+  description: null,
+  supervisorId: null,
+  status: 'pending',
+  createdAt: '2026-06-01T00:00:00.000Z',
+  createdBy: 'admin1',
+  ...over,
+});
 
 const input = (over: Partial<CreateProjectInput> = {}): CreateProjectInput => ({
   number: '26-27_0001',
@@ -69,5 +85,33 @@ describe('FirestoreProjectRepository (emulator)', () => {
     expect((await repo.findById(created.id))?.status).toBe('completed'); // unchanged
 
     expect(await repo.transition('nope', () => ({ status: 'completed' }))).toBeNull();
+  });
+
+  it('createWithWorkOrders commits the project and its work orders in one batch', async () => {
+    const { project, workOrders: created } = await repo.createWithWorkOrders(
+      input({ number: '26-27_0007' }),
+      async (projectId) => [
+        woInput({ project: projectId, number: '26-27_0007/0001', name: 'Civil' }),
+        woInput({ project: projectId, number: '26-27_0007/0002', name: 'Electrical' }),
+      ],
+    );
+
+    expect(await repo.findById(project.id)).toMatchObject({ id: project.id, number: '26-27_0007' });
+    expect(created.every((w) => w.project === project.id && w.id)).toBe(true);
+
+    const persisted = await workOrders.findByProject(project.id);
+    expect(persisted.map((w) => w.number).sort()).toEqual(['26-27_0007/0001', '26-27_0007/0002']);
+  });
+
+  it('createWithWorkOrders writes nothing when the work-order callback throws', async () => {
+    await expect(
+      repo.createWithWorkOrders(input({ number: '26-27_0008' }), async () => {
+        throw new Error('numbering failed');
+      }),
+    ).rejects.toThrow('numbering failed');
+
+    // The project number was reserved (gap is fine) but no project doc was written.
+    const all = await repo.list({ limit: 100 });
+    expect(all.items.some((p) => p.number === '26-27_0008')).toBe(false);
   });
 });

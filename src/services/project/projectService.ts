@@ -46,37 +46,44 @@ export class ProjectService {
   constructor(private readonly deps: ProjectServiceDeps) {}
 
   /** Creates a project together with its work orders in one flow. Reserves the project number,
-   * then a block of work-order numbers (one counter write), and returns the project + its WOs. */
+   * then a block of work-order numbers (one counter write), and writes the project + all its work
+   * orders in a SINGLE atomic batch — so a numbered project is never left without its work orders
+   * when a write fails midway. (Counter reservations stay outside the batch; see
+   * `ProjectRepository.createWithWorkOrders` for the resulting gap trade-off.) */
   async create(input: CreateProjectServiceInput): Promise<ProjectDetail> {
     const now = this.deps.clock();
     const number = await this.deps.numberingService.nextProjectNumber(now);
-    const project = await this.deps.projectRepository.create({
-      number,
-      name: input.name,
-      clientName: input.clientName,
-      projectEngineer: input.projectEngineer,
-      status: 'active',
-      createdAt: now.toISOString(),
-      createdBy: input.createdBy,
-    });
-
-    const numbers = await this.deps.numberingService.nextWorkOrderNumbers(
-      project.id,
-      project.number,
-      input.workOrders.length,
+    const { project, workOrders } = await this.deps.projectRepository.createWithWorkOrders(
+      {
+        number,
+        name: input.name,
+        clientName: input.clientName,
+        projectEngineer: input.projectEngineer,
+        status: 'active',
+        createdAt: now.toISOString(),
+        createdBy: input.createdBy,
+      },
+      async (projectId) => {
+        const numbers = await this.deps.numberingService.nextWorkOrderNumbers(
+          projectId,
+          number,
+          input.workOrders.length,
+        );
+        return input.workOrders.map(
+          (w, i): CreateWorkOrderInput => ({
+            project: projectId,
+            number: numbers[i],
+            name: w.name,
+            date: w.date,
+            description: w.description ?? null,
+            supervisorId: null,
+            status: 'pending',
+            createdAt: now.toISOString(),
+            createdBy: input.createdBy,
+          }),
+        );
+      },
     );
-    const woInputs: CreateWorkOrderInput[] = input.workOrders.map((w, i) => ({
-      project: project.id,
-      number: numbers[i],
-      name: w.name,
-      date: w.date,
-      description: w.description ?? null,
-      supervisorId: null,
-      status: 'pending',
-      createdAt: now.toISOString(),
-      createdBy: input.createdBy,
-    }));
-    const workOrders = await this.deps.workOrderRepository.createMany(woInputs);
 
     return toProjectDetail(project, await this.enrichWorkOrders(workOrders));
   }

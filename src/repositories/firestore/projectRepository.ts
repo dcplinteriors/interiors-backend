@@ -1,11 +1,15 @@
 import { CollectionReference } from 'firebase-admin/firestore';
 import { getDb } from '../../config/firebase';
 import { Project } from '../../models/project';
+import { WorkOrder } from '../../models/workOrder';
 import { clampLimit, Page, PageQuery, toPage } from '../../utils/pagination';
 import { CreateProjectInput, ProjectPatch, ProjectRepository } from '../projectRepository';
+import { CreateWorkOrderInput } from '../workOrderRepository';
 import { mapDoc, paged } from './helpers';
 
 const COLLECTION = 'projects';
+// The project aggregate root persists its initial work orders too (one atomic batch on create).
+const WORK_ORDERS = 'workOrders';
 
 export class FirestoreProjectRepository implements ProjectRepository {
   private col(): CollectionReference {
@@ -16,6 +20,27 @@ export class FirestoreProjectRepository implements ProjectRepository {
     const ref = this.col().doc();
     await ref.set(input);
     return { id: ref.id, ...input };
+  }
+
+  async createWithWorkOrders(
+    projectInput: CreateProjectInput,
+    makeWorkOrders: (projectId: string) => Promise<CreateWorkOrderInput[]>,
+  ): Promise<{ project: Project; workOrders: WorkOrder[] }> {
+    const db = getDb();
+    const projectRef = this.col().doc(); // id generated locally, not yet written
+    const woInputs = await makeWorkOrders(projectRef.id); // reserves WO numbers (counter writes)
+
+    const batch = db.batch();
+    batch.set(projectRef, projectInput);
+    const woCol = db.collection(WORK_ORDERS);
+    const workOrders = woInputs.map((input) => {
+      const ref = woCol.doc();
+      batch.set(ref, input);
+      return { id: ref.id, ...input };
+    });
+    await batch.commit(); // project + all work orders: all-or-nothing
+
+    return { project: { id: projectRef.id, ...projectInput }, workOrders };
   }
 
   async findById(id: string): Promise<Project | null> {

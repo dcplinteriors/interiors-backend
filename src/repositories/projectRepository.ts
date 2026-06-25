@@ -1,4 +1,6 @@
 import { Project } from '../models/project';
+import { WorkOrder } from '../models/workOrder';
+import { CreateWorkOrderInput } from './workOrderRepository';
 import { Page, PageQuery } from '../utils/pagination';
 
 export type CreateProjectInput = Omit<Project, 'id'>;
@@ -8,6 +10,21 @@ export type ProjectPatch = Partial<Omit<Project, 'id'>>;
  * no supervisor-scoped project query here. */
 export interface ProjectRepository {
   create(input: CreateProjectInput): Promise<Project>;
+  /**
+   * Atomically creates a project **and its initial work orders** in a single batched write —
+   * all-or-nothing, so a numbered project can never be left without the work orders the API
+   * contract requires (≥1). The project id is generated first and handed to [makeWorkOrders],
+   * which builds the work-order inputs from it (it reserves `<projectNumber>/NNNN` numbers, whose
+   * counter is keyed by the project id). Mirrors the callback style of [transition].
+   *
+   * Counter reservations happen inside [makeWorkOrders], before the commit, so they stay outside
+   * the batch — numbers remain unique/monotonic but may gap on a failed commit (the accepted
+   * trade-off for human reference numbers). Only the entity writes are atomic.
+   */
+  createWithWorkOrders(
+    projectInput: CreateProjectInput,
+    makeWorkOrders: (projectId: string) => Promise<CreateWorkOrderInput[]>,
+  ): Promise<{ project: Project; workOrders: WorkOrder[] }>;
   findById(id: string): Promise<Project | null>;
   /** Batch fetch by id (one round trip); missing ids are simply absent from the result. */
   findByIds(ids: string[]): Promise<Project[]>;
