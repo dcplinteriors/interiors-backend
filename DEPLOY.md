@@ -52,7 +52,31 @@ gcloud iam service-accounts add-iam-policy-binding $RUNTIME_SA \
   --role="roles/iam.serviceAccountTokenCreator"
 ```
 
-## 3. Store the one secret (Firebase Web API key)
+## 3. Storage bucket CORS (browser uploads)
+
+Attachments/bill images upload **straight from the browser** to a presigned GCS URL
+(`PUT https://storage.googleapis.com/...`). Because that's cross-origin with a
+`Content-Type` header, the browser fires a CORS preflight the bucket must allow —
+**without this, web uploads/reads fail silently in the browser** (native apps are
+unaffected; `curl` is too, since it ignores CORS). This is the **GCS bucket** CORS,
+separate from the API's `CORS_ORIGINS` env var.
+
+One-time, per bucket (config lives at [`storage.cors.json`](storage.cors.json)):
+
+```bash
+gcloud storage buckets update gs://${PROJECT_ID}.firebasestorage.app \
+  --cors-file=storage.cors.json
+# verify:
+gcloud storage buckets describe gs://${PROJECT_ID}.firebasestorage.app \
+  --format="default(cors_config)"
+```
+
+`origin: ["*"]` is intentional — CORS isn't the security boundary here (the signed
+URL's signature + short TTL + uid-scoped path are); `*` covers every random localhost
+dev port plus production hosting. `GET` is included so admins can view bills/photos
+(signed read URLs) from the web app, not just `PUT` uploads.
+
+## 4. Store the one secret (Firebase Web API key)
 
 ```bash
 printf 'YOUR_WEB_API_KEY' | gcloud secrets create FIREBASE_WEB_API_KEY \
@@ -61,7 +85,7 @@ gcloud secrets add-iam-policy-binding FIREBASE_WEB_API_KEY \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/secretmanager.secretAccessor"
 ```
 
-## 4. Deploy
+## 5. Deploy
 
 Builds the Dockerfile via Cloud Build and deploys, in one command:
 
@@ -77,7 +101,7 @@ gcloud run deploy $SERVICE \
 
 The command prints a Service URL like `https://dcpl-backend-xxxxx-el.a.run.app`.
 
-## 5. Point the apps at the new URL
+## 6. Point the apps at the new URL
 
 - Update the Admin and User Flutter apps' API base URL to the Cloud Run URL.
 - Confirm `CORS_ORIGINS` above lists every web origin that calls the API.
@@ -85,7 +109,7 @@ The command prints a Service URL like `https://dcpl-backend-xxxxx-el.a.run.app`.
 
 ## Redeploys
 
-Re-run step 4 (`gcloud run deploy ... --source .`) after any code change.
+Re-run step 5 (`gcloud run deploy ... --source .`) after any code change.
 
 ## Notes
 
