@@ -23,7 +23,7 @@ const input = (over: Partial<CreateMaterialRequestInput> = {}): CreateMaterialRe
   vendor: null,
   poNumber: null,
   remarks: null,
-  returnReason: null,
+  billImages: [],
   ...over,
 });
 

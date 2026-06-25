@@ -57,7 +57,7 @@ const mr = (over: Partial<MaterialRequest> = {}): MaterialRequest => ({
   vendor: null,
   poNumber: null,
   remarks: null,
-  returnReason: null,
+  billImages: [],
   ...over,
 });
 
@@ -380,7 +380,7 @@ describe('POST /api/material-requests/:id/decline', () => {
   });
 });
 
-describe('supervisor transitions (cancel / close / return)', () => {
+describe('supervisor transitions (cancel / close)', () => {
   it('cancel: owner cancels a requested item; 403 for a non-owner; 409 once not requested', async () => {
     const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', orderBy: 'sup1', status: 'requested' })], workOrders: [workOrder()] }).app)
       .post('/api/material-requests/mr1/cancel')
@@ -398,36 +398,42 @@ describe('supervisor transitions (cancel / close / return)', () => {
     expect(late.status).toBe(409);
   });
 
-  it('close: the assigned supervisor closes an accepted item; 409 if not accepted; 403 for a non-assignee', async () => {
+  it('close: the assigned supervisor closes an accepted item with bill image(s) + optional note', async () => {
     const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
       .post('/api/material-requests/mr1/close')
-      .set(...bearer());
-    expect(ok.body.status).toBe('closed');
+      .set(...bearer())
+      .send({ billImages: ['material-requests/sup1/bill.jpg'], note: 'paid cash' });
+    expect(ok.body).toMatchObject({
+      status: 'closed',
+      billImages: ['material-requests/sup1/bill.jpg'],
+      closeNote: 'paid cash',
+    });
 
     const notAccepted = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'requested' })] }).app)
       .post('/api/material-requests/mr1/close')
-      .set(...bearer());
+      .set(...bearer())
+      .send({ billImages: ['material-requests/sup1/bill.jpg'] });
     expect(notAccepted.status).toBe(409);
 
     const notAssignee = await request(setup(supervisorVerifier('sup9'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })] }).app)
       .post('/api/material-requests/mr1/close')
-      .set(...bearer());
+      .set(...bearer())
+      .send({ billImages: ['material-requests/sup9/bill.jpg'] });
     expect(notAssignee.status).toBe(403);
   });
 
-  it('return: the assigned supervisor returns an accepted item with a required reason', async () => {
-    const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
-      .post('/api/material-requests/mr1/return')
+  it('close: rejects no bill image (400) and a foreign bill path (400)', async () => {
+    const noBill = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
+      .post('/api/material-requests/mr1/close')
       .set(...bearer())
-      .send({ reason: 'wrong size' });
-    expect(ok.status).toBe(200);
-    expect(ok.body).toMatchObject({ status: 'returned', returnReason: 'wrong size' });
+      .send({ note: 'no bill attached' });
+    expect(noBill.status).toBe(400);
 
-    const noReason = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })] }).app)
-      .post('/api/material-requests/mr1/return')
+    const foreign = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
+      .post('/api/material-requests/mr1/close')
       .set(...bearer())
-      .send({});
-    expect(noReason.status).toBe(400);
+      .send({ billImages: ['material-requests/sup2/stolen.jpg'] });
+    expect(foreign.status).toBe(400);
   });
 });
 

@@ -57,7 +57,7 @@ const mr = (over: Partial<MaterialRequest> = {}): MaterialRequest => ({
   vendor: null,
   poNumber: null,
   remarks: null,
-  returnReason: null,
+  billImages: [],
   ...over,
 });
 
@@ -165,7 +165,7 @@ describe('POST /api/work-orders/:id/assign', () => {
     expect(res.status).toBe(400);
   });
 
-  it('reassigning moves requests to the new supervisor and supersedes the open ones', async () => {
+  it('reassigning moves requests to the new supervisor with statuses unchanged', async () => {
     const { app, materialRequestRepository } = setup(adminVerifier, {
       workOrders: [workOrder({ id: 'w1', supervisorId: 'sup1', status: 'active' })],
       users: [supRecord('sup1'), supRecord('sup2')],
@@ -185,12 +185,12 @@ describe('POST /api/work-orders/:id/assign', () => {
 
     const items = await materialRequestRepository.findByWorkOrder('w1');
     const byId = Object.fromEntries(items.map((i) => [i.id, i]));
-    // All visibility moves to sup2.
+    // All visibility moves to sup2, but every status is left exactly as it was.
     expect(byId['open'].supervisorId).toBe('sup2');
+    expect(byId['proc'].supervisorId).toBe('sup2');
     expect(byId['acc'].supervisorId).toBe('sup2');
-    // Vendor-pending items are superseded; the accepted one carries over unchanged.
-    expect(byId['open'].status).toBe('superseded');
-    expect(byId['proc'].status).toBe('superseded');
+    expect(byId['open'].status).toBe('requested');
+    expect(byId['proc'].status).toBe('processing');
     expect(byId['acc'].status).toBe('accepted');
   });
 

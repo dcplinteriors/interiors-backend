@@ -3,10 +3,8 @@ export type MaterialRequestStatus =
   | 'processing'
   | 'accepted'
   | 'closed'
-  | 'returned'
   | 'declined'
-  | 'cancelled'
-  | 'superseded';
+  | 'cancelled';
 
 /** Storage references to uploaded files (the upload itself is the app's responsibility). */
 export interface Attachments {
@@ -60,7 +58,9 @@ export interface MaterialRequest {
   /** Admin note — optional when assigning the vendor; REQUIRED as the decline reason. */
   remarks?: string | null;
 
-  // Supervisor, on return
-  /** Required reason when the supervisor returns an accepted item. */
-  returnReason?: string | null;
+  // Supervisor, on close
+  /** Optional note the supervisor adds when closing the item. Kept separate from admin `remarks`. */
+  closeNote?: string | null;
+  /** Storage paths of the bill image(s) the supervisor attaches on close — at least one required. */
+  billImages: string[];
 }

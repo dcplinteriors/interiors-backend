@@ -47,6 +47,13 @@ export interface AssignVendorInput {
   remarks?: string;
 }
 
+export interface CloseInput {
+  /** Optional supervisor note. */
+  note?: string;
+  /** Storage paths of the bill image(s) — at least one. */
+  billImages: string[];
+}
+
 export interface MaterialRequestServiceDeps {
   materialRequestRepository: MaterialRequestRepository;
   workOrderRepository: WorkOrderRepository;
@@ -63,8 +70,6 @@ const ACTION_VERB: Record<MaterialRequestAction, string> = {
   decline: 'decline',
   cancel: 'cancel',
   close: 'close',
-  return: 'return',
-  supersede: 'supersede',
 };
 
 export class MaterialRequestService {
@@ -130,7 +135,8 @@ export class MaterialRequestService {
       vendor: null,
       poNumber: null,
       remarks: null,
-      returnReason: null,
+      closeNote: null,
+      billImages: [],
     }));
 
     const created = await this.deps.materialRequestRepository.createMany(inputs);
@@ -188,20 +194,22 @@ export class MaterialRequestService {
     return this.transition(id, 'cancel', { actorUid: supervisorUid });
   }
 
-  /** accepted → closed (the assigned supervisor finalizes after delivery). */
-  async close(id: string, supervisorUid: string): Promise<MaterialRequestView> {
-    return this.transition(id, 'close', { actorUid: supervisorUid });
-  }
-
-  /** accepted → returned (the assigned supervisor; reason required). */
-  async returnItem(
+  /** accepted → closed (the assigned supervisor finalizes after delivery; bill image(s)
+   * required, optional note). */
+  async close(
     id: string,
     supervisorUid: string,
-    reason: string,
+    input: CloseInput,
   ): Promise<MaterialRequestView> {
-    return this.transition(id, 'return', {
+    // Bill images must be the supervisor's own uploads — reject forged/foreign paths.
+    for (const path of input.billImages) {
+      if (!isOwnAttachmentPath(path, supervisorUid)) {
+        throw new AppError(400, 'Bill image must be your own upload');
+      }
+    }
+    return this.transition(id, 'close', {
       actorUid: supervisorUid,
-      patch: { returnReason: reason },
+      patch: { billImages: input.billImages, closeNote: input.note ?? null },
     });
   }
 

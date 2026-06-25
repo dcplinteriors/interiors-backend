@@ -10,7 +10,7 @@ import { WorkOrderQuery, WorkOrderRepository } from '../../repositories/workOrde
 import { Page } from '../../utils/pagination';
 import { WorkOrderView, toWorkOrderView } from '../../views/workOrderView';
 import { NumberingService } from '../numbering/numberingService';
-import { SUPERSEDABLE_STATUSES, isOpen } from '../materialRequest/materialRequest.stateMachine';
+import { isOpen } from '../materialRequest/materialRequest.stateMachine';
 import {
   WORK_ORDER_TRANSITIONS,
   WorkOrderAction,
@@ -78,7 +78,7 @@ export class WorkOrderService {
   /**
    * Assigns a supervisor to a work order (admin). First assignment goes pending → active.
    * Re-assigning to a DIFFERENT supervisor moves the work order and ALL its requests to the new
-   * supervisor (the old one loses visibility) and supersedes any still vendor-pending item.
+   * supervisor (the old one loses visibility); request statuses are left unchanged.
    */
   async assign(workOrderId: string, supervisorId: string): Promise<WorkOrderView> {
     const user = await this.deps.userRepository.findByUid(supervisorId);
@@ -167,24 +167,17 @@ export class WorkOrderService {
   }
 
   /**
-   * Moves every request on a REASSIGNED work order to the new supervisor, superseding the still
-   * vendor-pending ones; `accepted` and already-terminal items carry over with their status intact
-   * (the new supervisor can close/return the accepted ones). Applied as one batched sweep (chunked
-   * to Firestore's 500-op limit; atomic per chunk).
-   *
-   * NOTE: this is a bulk cross-aggregate operation, so it deliberately bypasses the per-item
-   * `transition()` funnel — `SUPERSEDABLE_STATUSES` (from the state machine) is the shared guard
-   * for which items get superseded.
+   * Moves every request on a REASSIGNED work order to the new supervisor. Statuses are left
+   * unchanged — the new supervisor simply inherits the items as-is (the old supervisor loses
+   * visibility). Applied as one batched sweep (chunked to Firestore's 500-op limit; atomic per
+   * chunk).
    */
   private async reassignRequests(workOrderId: string, newSupervisorId: string): Promise<void> {
     const requests = await this.deps.materialRequestRepository.findByWorkOrder(workOrderId);
     if (requests.length === 0) return;
     const updates = requests.map((r) => ({
       id: r.id,
-      patch: {
-        supervisorId: newSupervisorId,
-        ...(SUPERSEDABLE_STATUSES.includes(r.status) ? { status: 'superseded' as const } : {}),
-      },
+      patch: { supervisorId: newSupervisorId },
     }));
     await this.deps.materialRequestRepository.updateMany(updates);
   }

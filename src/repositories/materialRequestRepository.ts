@@ -26,7 +26,7 @@ export interface MaterialRequestRepository {
   createMany(inputs: CreateMaterialRequestInput[]): Promise<MaterialRequest[]>;
   findById(id: string): Promise<MaterialRequest | null>;
   /** All items on a work order (unpaginated) — for the completion gate and the
-   * reassignment supersede sweep. */
+   * reassignment sweep. */
   findByWorkOrder(workOrderId: string): Promise<MaterialRequest[]>;
   list(query?: MaterialRequestQuery): Promise<Page<MaterialRequest>>;
   /** A supervisor's visible items — those on work orders CURRENTLY assigned to them

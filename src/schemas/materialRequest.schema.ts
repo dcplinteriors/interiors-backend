@@ -41,9 +41,13 @@ export const declineMaterialRequestSchema = z.object({
   remarks: nonEmptyString,
 });
 
-/** Return (accepted → returned): a reason is REQUIRED. */
-export const returnMaterialRequestSchema = z.object({
-  reason: nonEmptyString,
+/** Max bill images a supervisor may attach when closing an item. Single knob — change freely. */
+export const MAX_BILL_IMAGES = 3;
+
+/** Close (accepted → closed): at least one bill image is REQUIRED; an optional note. */
+export const closeMaterialRequestSchema = z.object({
+  note: z.string().trim().optional(),
+  billImages: z.array(nonEmptyString).min(1).max(MAX_BILL_IMAGES),
 });
 
 const MATERIAL_REQUEST_STATUSES = [
@@ -51,10 +55,8 @@ const MATERIAL_REQUEST_STATUSES = [
   'processing',
   'accepted',
   'closed',
-  'returned',
   'declined',
   'cancelled',
-  'superseded',
 ] as const;
 
 export const listMaterialRequestQuerySchema = z.object({

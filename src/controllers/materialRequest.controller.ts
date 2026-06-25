@@ -5,10 +5,10 @@ import { MaterialRequestService } from '../services/materialRequest/materialRequ
 import {
   acceptMaterialRequestSchema,
   assignVendorSchema,
+  closeMaterialRequestSchema,
   countMaterialRequestQuerySchema,
   declineMaterialRequestSchema,
   listMaterialRequestQuerySchema,
-  returnMaterialRequestSchema,
   submitMaterialRequestSchema,
 } from '../schemas/materialRequest.schema';
 
@@ -54,12 +54,8 @@ export function buildMaterialRequestController(service: MaterialRequestService) 
     }),
 
     close: asyncHandler(async (req: Request, res: Response) => {
-      res.status(200).json(await service.close(req.params.id, authOf(req).uid));
-    }),
-
-    return: asyncHandler(async (req: Request, res: Response) => {
-      const { reason } = returnMaterialRequestSchema.parse(req.body);
-      res.status(200).json(await service.returnItem(req.params.id, authOf(req).uid, reason));
+      const input = closeMaterialRequestSchema.parse(req.body);
+      res.status(200).json(await service.close(req.params.id, authOf(req).uid, input));
     }),
   };
 }

@@ -21,7 +21,6 @@ export function buildMaterialRequestRoutes(container: Container): Router {
   // Supervisor transitions
   router.post('/:id/cancel', requireRole('supervisor'), controller.cancel); // requested → cancelled
   router.post('/:id/close', requireRole('supervisor'), controller.close); // accepted → closed
-  router.post('/:id/return', requireRole('supervisor'), controller.return); // accepted → returned
 
   return router;
 }
