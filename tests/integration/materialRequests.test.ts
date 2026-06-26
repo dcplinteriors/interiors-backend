@@ -6,6 +6,7 @@ import { FakeProjectRepository } from '../fakes/fakeProjectRepository';
 import { FakeWorkOrderRepository } from '../fakes/fakeWorkOrderRepository';
 import { FakeUserRepository } from '../fakes/fakeUserRepository';
 import { FakeCounterRepository } from '../fakes/fakeCounterRepository';
+import { FakeStorageService } from '../fakes/fakeStorageService';
 import { Project } from '../../src/models/project';
 import { WorkOrder } from '../../src/models/workOrder';
 import { MaterialRequest } from '../../src/models/materialRequest';
@@ -91,6 +92,7 @@ function setup(
     workOrderRepository,
     userRepository,
     counterRepository,
+    storageService: new FakeStorageService(),
   });
   return { app, materialRequestRepository };
 }
@@ -181,7 +183,7 @@ describe('POST /api/material-requests (submit)', () => {
       .set(...bearer())
       .send({
         workOrderId: 'wo1',
-        items: [item({ attachments: { photos: ['material-requests/sup2/stolen.jpg'] } })],
+        items: [item({ attachments: { photos: ['tmp/material-requests/sup2/stolen.jpg'] } })],
       });
     expect(res.status).toBe(400);
     expect((await materialRequestRepository.list()).items).toHaveLength(0);
@@ -402,7 +404,8 @@ describe('supervisor transitions (cancel / close)', () => {
     const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })], workOrders: [workOrder()] }).app)
       .post('/api/material-requests/mr1/close')
       .set(...bearer())
-      .send({ billImages: ['material-requests/sup1/bill.jpg'], note: 'paid cash' });
+      // Submit staged bill paths; the server finalizes them to permanent keys on close.
+      .send({ billImages: ['tmp/material-requests/sup1/bill.jpg'], note: 'paid cash' });
     expect(ok.body).toMatchObject({
       status: 'closed',
       billImages: ['material-requests/sup1/bill.jpg'],
@@ -412,13 +415,13 @@ describe('supervisor transitions (cancel / close)', () => {
     const notAccepted = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'requested' })] }).app)
       .post('/api/material-requests/mr1/close')
       .set(...bearer())
-      .send({ billImages: ['material-requests/sup1/bill.jpg'] });
+      .send({ billImages: ['tmp/material-requests/sup1/bill.jpg'] });
     expect(notAccepted.status).toBe(409);
 
     const notAssignee = await request(setup(supervisorVerifier('sup9'), { requests: [mr({ id: 'mr1', supervisorId: 'sup1', status: 'accepted' })] }).app)
       .post('/api/material-requests/mr1/close')
       .set(...bearer())
-      .send({ billImages: ['material-requests/sup9/bill.jpg'] });
+      .send({ billImages: ['tmp/material-requests/sup9/bill.jpg'] });
     expect(notAssignee.status).toBe(403);
   });
 

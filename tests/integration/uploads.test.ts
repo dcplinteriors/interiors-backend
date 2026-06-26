@@ -20,7 +20,7 @@ describe('POST /api/uploads/sign', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.uploadUrl).toBeTruthy();
-    expect(res.body.path).toMatch(/^material-requests\/sup7\//);
+    expect(res.body.path).toMatch(/^tmp\/material-requests\/sup7\//);
     expect(storageService.uploads).toEqual([
       { supervisorUid: 'sup7', kind: 'photo', contentType: 'image/jpeg' },
     ]);
@@ -35,7 +35,7 @@ describe('POST /api/uploads/sign', () => {
       .send({ kind: 'audio', contentType: 'audio/mpeg' });
 
     expect(res.status).toBe(200);
-    expect(res.body.path).toMatch(/^material-requests\/sup7\/.*\.m4a$/);
+    expect(res.body.path).toMatch(/^tmp\/material-requests\/sup7\/.*\.m4a$/);
     expect(storageService.uploads).toEqual([
       { supervisorUid: 'sup7', kind: 'audio', contentType: 'audio/mpeg' },
     ]);
@@ -50,7 +50,7 @@ describe('POST /api/uploads/sign', () => {
       .send({ kind: 'photo', contentType: 'image/jpeg', scope: 'profile' });
 
     expect(res.status).toBe(200);
-    expect(res.body.path).toMatch(/^profiles\/sup7\//);
+    expect(res.body.path).toMatch(/^tmp\/profiles\/sup7\//);
     expect(storageService.uploads[0]).toMatchObject({ scope: 'profile' });
   });
 

@@ -76,7 +76,33 @@ URL's signature + short TTL + uid-scoped path are); `*` covers every random loca
 dev port plus production hosting. `GET` is included so admins can view bills/photos
 (signed read URLs) from the web app, not just `PUT` uploads.
 
-## 4. Store the one secret (Firebase Web API key)
+## 4. Storage lifecycle (sweep orphaned uploads)
+
+Clients upload each attachment **immediately** (on pick / stop-recording), to a
+staging prefix `tmp/…`. The backend **moves** an object to its permanent key
+(`material-requests/…`, `profiles/…`) only when a saved request/profile commits to it
+(`StorageService.finalizeUpload`). So anything a user uploads then removes, or never
+submits, is left in `tmp/` — never referenced, never cleaned. This lifecycle rule
+deletes those after 1 day; committed files have already left `tmp/`, so they're never
+touched.
+
+One-time, per bucket (config lives at [`storage.lifecycle.json`](storage.lifecycle.json)):
+
+```bash
+gcloud storage buckets update gs://${PROJECT_ID}.firebasestorage.app \
+  --lifecycle-file=storage.lifecycle.json
+# verify:
+gcloud storage buckets describe gs://${PROJECT_ID}.firebasestorage.app \
+  --format="default(lifecycle_config)"
+```
+
+1 day is a generous safety margin (uploads normally commit within minutes of submit).
+The rule is scoped to `matchesPrefix: ["tmp/"]`, so it can **never** delete a committed
+attachment. Note it doesn't cover files orphaned by *replacing* an already-committed one
+(e.g. changing a profile photo) — those sit under the permanent prefix; handle separately
+if it ever matters.
+
+## 5. Store the one secret (Firebase Web API key)
 
 ```bash
 printf 'YOUR_WEB_API_KEY' | gcloud secrets create FIREBASE_WEB_API_KEY \
@@ -85,7 +111,7 @@ gcloud secrets add-iam-policy-binding FIREBASE_WEB_API_KEY \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/secretmanager.secretAccessor"
 ```
 
-## 5. Deploy
+## 6. Deploy
 
 Builds the Dockerfile via Cloud Build and deploys, in one command:
 
@@ -101,7 +127,7 @@ gcloud run deploy $SERVICE \
 
 The command prints a Service URL like `https://dcpl-backend-xxxxx-el.a.run.app`.
 
-## 6. Point the apps at the new URL
+## 7. Point the apps at the new URL
 
 - Update the Admin and User Flutter apps' API base URL to the Cloud Run URL.
 - Confirm `CORS_ORIGINS` above lists every web origin that calls the API.

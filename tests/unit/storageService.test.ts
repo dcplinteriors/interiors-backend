@@ -49,3 +49,13 @@ describe('FirebaseStorageService.signUpload', () => {
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 });
+
+describe('FirebaseStorageService.finalizeUpload', () => {
+  it('returns an already-permanent path unchanged (no Storage access)', async () => {
+    // The non-staged early-return runs before any bucket access, so this is safe without creds.
+    const service = new FirebaseStorageService();
+    await expect(service.finalizeUpload('material-requests/sup1/x.jpg')).resolves.toBe(
+      'material-requests/sup1/x.jpg',
+    );
+  });
+});

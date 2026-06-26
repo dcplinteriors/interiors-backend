@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getBucket } from '../../config/firebase';
 import { AppError } from '../../utils/AppError';
+import { TMP_PREFIX } from '../../utils/attachmentPath';
 
 export type AttachmentKind = 'photo' | 'audio';
 /** Where an uploaded object lives: a material-request attachment, or a supervisor profile image. */
@@ -51,6 +52,13 @@ export interface SignedUpload {
 export interface StorageService {
   signUpload(input: SignUploadInput): Promise<SignedUpload>;
   signDownload(path: string): Promise<string>;
+  /**
+   * Promotes a freshly-uploaded object out of the staging prefix to its permanent key, returning
+   * that key. Called when a saved request/profile commits to an upload — so anything NOT finalized
+   * stays in staging and is swept by the bucket lifecycle rule. No-op (returns the path unchanged)
+   * for an already-permanent key, so it's safe to call idempotently.
+   */
+  finalizeUpload(path: string): Promise<string>;
 }
 
 const UPLOAD_TTL_MS = 15 * 60 * 1000; // 15 min — enough to upload, short enough to be safe
@@ -70,11 +78,12 @@ export class FirebaseStorageService implements StorageService {
     if (!ext) {
       throw new AppError(400, `Unsupported ${kind} content type: ${contentType}`);
     }
-    // Organized + scalable: partition by supervisor; UUID filenames avoid collisions and
-    // keep paths unguessable. Stored (on a request, or as the user's photoUrl) and resolved to a
-    // read URL on demand.
+    // Organized + scalable: partition by supervisor; UUID filenames avoid collisions and keep
+    // paths unguessable. Lands in the staging prefix — finalizeUpload moves it to its permanent
+    // key (`<prefix>/<uid>/...`) once a request/profile references it; otherwise the lifecycle
+    // rule sweeps it.
     const prefix = scope === 'profile' ? 'profiles' : 'material-requests';
-    const path = `${prefix}/${supervisorUid}/${randomUUID()}.${ext}`;
+    const path = `${TMP_PREFIX}${prefix}/${supervisorUid}/${randomUUID()}.${ext}`;
     const [uploadUrl] = await getBucket().file(path).getSignedUrl({
       version: 'v4',
       action: 'write',
@@ -91,5 +100,22 @@ export class FirebaseStorageService implements StorageService {
       expires: Date.now() + DOWNLOAD_TTL_MS,
     });
     return url;
+  }
+
+  async finalizeUpload(path: string): Promise<string> {
+    if (!path.startsWith(TMP_PREFIX)) return path; // already permanent — nothing to move
+    const dest = path.slice(TMP_PREFIX.length);
+    const bucket = getBucket();
+    try {
+      // move = server-side copy + delete of the source; cheap for our small files.
+      await bucket.file(path).move(dest);
+    } catch {
+      // Source gone. If the permanent object already exists, a prior call (e.g. a retried
+      // submit) already moved it — treat as success (idempotent). Otherwise the upload never
+      // landed, or has expired / been swept.
+      const [committed] = await bucket.file(dest).exists();
+      if (!committed) throw new AppError(400, 'Attachment upload not found or expired');
+    }
+    return dest;
   }
 }

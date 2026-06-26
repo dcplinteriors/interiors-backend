@@ -3,6 +3,7 @@ import { createApp } from '../../src/app';
 import { createContainer } from '../../src/container';
 import { DecodedToken, TokenVerifier } from '../../src/services/auth/tokenVerifier';
 import { FakeUserRepository } from '../fakes/fakeUserRepository';
+import { FakeStorageService } from '../fakes/fakeStorageService';
 import { UserRecord } from '../../src/models/user';
 
 const verifier = (decoded: DecodedToken): TokenVerifier => ({
@@ -10,7 +11,13 @@ const verifier = (decoded: DecodedToken): TokenVerifier => ({
 });
 
 const appWith = (v: TokenVerifier, users: UserRecord[] = []) =>
-  createApp(createContainer({ tokenVerifier: v, userRepository: new FakeUserRepository(users) }));
+  createApp(
+    createContainer({
+      tokenVerifier: v,
+      userRepository: new FakeUserRepository(users),
+      storageService: new FakeStorageService(),
+    }),
+  );
 
 const supervisor = (over: Partial<UserRecord> = {}): UserRecord => ({
   uid: 'sup1',
@@ -66,7 +73,8 @@ describe('PATCH /api/me', () => {
     const res = await request(app)
       .patch('/api/me')
       .set('Authorization', 'Bearer good')
-      .send({ name: 'Ravi K', photoUrl: 'profiles/sup1/new.jpg' });
+      // Client submits the staged path; the server finalizes it to the permanent key.
+      .send({ name: 'Ravi K', photoUrl: 'tmp/profiles/sup1/new.jpg' });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ name: 'Ravi K', photoUrl: 'profiles/sup1/new.jpg' });
   });
@@ -76,7 +84,7 @@ describe('PATCH /api/me', () => {
     const res = await request(app)
       .patch('/api/me')
       .set('Authorization', 'Bearer good')
-      .send({ photoUrl: 'profiles/other/x.jpg' });
+      .send({ photoUrl: 'tmp/profiles/other/x.jpg' });
     expect(res.status).toBe(400);
   });
 

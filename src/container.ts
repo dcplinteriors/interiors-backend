@@ -86,6 +86,7 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
       numberingService,
       clock,
     });
+  const storageService = overrides.storageService ?? new FirebaseStorageService();
   const materialRequestService =
     overrides.materialRequestService ??
     new MaterialRequestService({
@@ -94,9 +95,9 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
       projectRepository,
       userRepository,
       numberingService,
+      storageService,
       clock,
     });
-  const storageService = overrides.storageService ?? new FirebaseStorageService();
 
   return {
     clock,

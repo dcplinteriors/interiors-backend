@@ -2,10 +2,11 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { AppError } from '../utils/AppError';
 import { authOf } from '../utils/requestAuth';
-import { isOwnProfilePath } from '../utils/attachmentPath';
+import { isOwnStagedProfilePath } from '../utils/attachmentPath';
 import { AuthUser } from '../types/auth';
 import { UserRecord } from '../models/user';
 import { UserRepository } from '../repositories/userRepository';
+import { StorageService } from '../services/storage/storageService';
 import { updateMeSchema } from '../schemas/me.schema';
 
 /** The caller's profile: identity from the verified token + name/photo from the user record. */
@@ -19,7 +20,7 @@ function profile(auth: AuthUser, record: UserRecord | null) {
   };
 }
 
-export function buildMeController(userRepository: UserRepository) {
+export function buildMeController(userRepository: UserRepository, storageService: StorageService) {
   return {
     get: asyncHandler(async (req: Request, res: Response) => {
       const auth = authOf(req);
@@ -31,12 +32,16 @@ export function buildMeController(userRepository: UserRepository) {
     update: asyncHandler(async (req: Request, res: Response) => {
       const auth = authOf(req);
       const patch = updateMeSchema.parse(req.body);
-      // A non-null photoUrl must be the caller's own uploaded profile image (issued by
-      // /uploads/sign with scope=profile) — same own-path rule as attachments.
-      if (patch.photoUrl != null && !isOwnProfilePath(patch.photoUrl, auth.uid)) {
+      // A non-null photoUrl must be the caller's own freshly-uploaded (staged) profile image
+      // (issued by /uploads/sign with scope=profile) — same own-path rule as attachments.
+      if (patch.photoUrl != null && !isOwnStagedProfilePath(patch.photoUrl, auth.uid)) {
         throw new AppError(400, 'photoUrl must be your own uploaded profile image');
       }
-      const record = await userRepository.update(auth.uid, patch);
+      // Commit a new photo out of staging to its permanent key; null (clear) / undefined
+      // (unchanged) pass through untouched.
+      const photoUrl =
+        patch.photoUrl == null ? patch.photoUrl : await storageService.finalizeUpload(patch.photoUrl);
+      const record = await userRepository.update(auth.uid, { ...patch, photoUrl });
       if (!record) throw new AppError(404, 'User not found');
       res.status(200).json(profile(auth, record));
     }),

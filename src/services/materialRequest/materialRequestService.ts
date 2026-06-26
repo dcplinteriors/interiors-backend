@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AppError } from '../../utils/AppError';
-import { isOwnAttachmentPath } from '../../utils/attachmentPath';
+import { isOwnStagedAttachmentPath } from '../../utils/attachmentPath';
 import { uniqueDefined } from '../../utils/collection';
 import { Page } from '../../utils/pagination';
 import { Clock } from '../../utils/clock';
@@ -18,6 +18,7 @@ import { WorkOrderRepository } from '../../repositories/workOrderRepository';
 import { UserRepository } from '../../repositories/userRepository';
 import { MaterialRequestView, toMaterialRequestView } from '../../views/materialRequestView';
 import { NumberingService } from '../numbering/numberingService';
+import { StorageService } from '../storage/storageService';
 import {
   MATERIAL_REQUEST_TRANSITIONS,
   MaterialRequestAction,
@@ -60,6 +61,7 @@ export interface MaterialRequestServiceDeps {
   projectRepository: ProjectRepository;
   userRepository: UserRepository;
   numberingService: NumberingService;
+  storageService: StorageService;
   clock: Clock;
 }
 
@@ -94,12 +96,13 @@ export class MaterialRequestService {
       throw new AppError(409, 'Project is completed');
     }
 
-    // Attachment paths must be the supervisor's own uploads — reject forged/foreign paths.
+    // Attachment paths must be the supervisor's own freshly-uploaded (staged) files — reject
+    // forged/foreign paths.
     for (const item of items) {
       const paths = [...(item.attachments?.photos ?? [])];
       if (item.attachments?.audio) paths.push(item.attachments.audio);
       for (const path of paths) {
-        if (!isOwnAttachmentPath(path, supervisorUid)) {
+        if (!isOwnStagedAttachmentPath(path, supervisorUid)) {
           throw new AppError(400, 'Attachment must be your own upload');
         }
       }
@@ -112,6 +115,18 @@ export class MaterialRequestService {
       workOrderId,
       workOrder.number,
       items.length,
+    );
+    // Commit each referenced upload — move it out of staging to its permanent key, so it survives
+    // the lifecycle sweep and is what we persist on the request.
+    const committed = await Promise.all(
+      items.map(async (item) => ({
+        photos: await Promise.all(
+          (item.attachments?.photos ?? []).map((p) => this.deps.storageService.finalizeUpload(p)),
+        ),
+        audio: item.attachments?.audio
+          ? await this.deps.storageService.finalizeUpload(item.attachments.audio)
+          : null,
+      })),
     );
     const inputs: CreateMaterialRequestInput[] = items.map((item, i) => ({
       itemNumber: itemNumbers[i],
@@ -126,8 +141,8 @@ export class MaterialRequestService {
       quantity: item.quantity,
       unit: item.unit,
       attachments: {
-        photos: item.attachments?.photos ?? [],
-        audio: item.attachments?.audio ?? null,
+        photos: committed[i].photos,
+        audio: committed[i].audio,
       },
       status: 'requested',
       createdAt: now.toISOString(),
@@ -201,15 +216,19 @@ export class MaterialRequestService {
     supervisorUid: string,
     input: CloseInput,
   ): Promise<MaterialRequestView> {
-    // Bill images must be the supervisor's own uploads — reject forged/foreign paths.
+    // Bill images must be the supervisor's own freshly-uploaded (staged) files — reject
+    // forged/foreign paths, then commit them out of staging to their permanent keys.
     for (const path of input.billImages) {
-      if (!isOwnAttachmentPath(path, supervisorUid)) {
+      if (!isOwnStagedAttachmentPath(path, supervisorUid)) {
         throw new AppError(400, 'Bill image must be your own upload');
       }
     }
+    const billImages = await Promise.all(
+      input.billImages.map((p) => this.deps.storageService.finalizeUpload(p)),
+    );
     return this.transition(id, 'close', {
       actorUid: supervisorUid,
-      patch: { billImages: input.billImages, closeNote: input.note ?? null },
+      patch: { billImages, closeNote: input.note ?? null },
     });
   }
 
