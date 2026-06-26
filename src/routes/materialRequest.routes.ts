@@ -17,6 +17,7 @@ export function buildMaterialRequestRoutes(container: Container): Router {
   router.post('/:id/accept', requireRole('admin'), controller.accept); // requested → processing
   router.post('/:id/assign-vendor', requireRole('admin'), controller.assignVendor); // processing → accepted
   router.post('/:id/decline', requireRole('admin'), controller.decline);
+  router.patch('/:id', requireRole('admin'), controller.editItem); // fix item details (pre-vendor)
 
   // Supervisor transitions
   router.post('/:id/cancel', requireRole('supervisor'), controller.cancel); // requested → cancelled

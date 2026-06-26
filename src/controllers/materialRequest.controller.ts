@@ -8,6 +8,7 @@ import {
   closeMaterialRequestSchema,
   countMaterialRequestQuerySchema,
   declineMaterialRequestSchema,
+  editMaterialRequestSchema,
   listMaterialRequestQuerySchema,
   submitMaterialRequestSchema,
 } from '../schemas/materialRequest.schema';
@@ -47,6 +48,11 @@ export function buildMaterialRequestController(service: MaterialRequestService) 
     decline: asyncHandler(async (req: Request, res: Response) => {
       const { remarks } = declineMaterialRequestSchema.parse(req.body);
       res.status(200).json(await service.decline(req.params.id, remarks));
+    }),
+
+    editItem: asyncHandler(async (req: Request, res: Response) => {
+      const patch = editMaterialRequestSchema.parse(req.body);
+      res.status(200).json(await service.editItem(req.params.id, patch));
     }),
 
     cancel: asyncHandler(async (req: Request, res: Response) => {

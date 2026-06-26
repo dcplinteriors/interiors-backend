@@ -55,6 +55,16 @@ export interface CloseInput {
   billImages: string[];
 }
 
+/** Admin correction of the supervisor-entered item fields. Each is optional (only provided fields
+ * are changed); status/attachments/admin fields are untouched. */
+export interface EditItemInput {
+  particular?: string;
+  make?: string;
+  size?: string;
+  quantity?: number;
+  unit?: string;
+}
+
 export interface MaterialRequestServiceDeps {
   materialRequestRepository: MaterialRequestRepository;
   workOrderRepository: WorkOrderRepository;
@@ -200,6 +210,29 @@ export class MaterialRequestService {
   /** requested|processing → declined (admin; reason required). */
   async decline(id: string, remarks: string): Promise<MaterialRequestView> {
     return this.transition(id, 'decline', { patch: { remarks } });
+  }
+
+  /**
+   * Admin fixes the supervisor's item entry (wrong make/qty/etc.). Allowed only BEFORE a vendor is
+   * assigned (requested|processing) so the details can't drift from an issued PO; status is never
+   * changed. Done through the repo's atomic transition so the status gate and the write can't race.
+   */
+  async editItem(id: string, input: EditItemInput): Promise<MaterialRequestView> {
+    const updated = await this.deps.materialRequestRepository.transition(id, (current) => {
+      if (current.status !== 'requested' && current.status !== 'processing') {
+        throw new AppError(409, `Cannot edit a ${current.status} request`);
+      }
+      // Only the provided item fields; spreading skips undefined keys.
+      return {
+        ...(input.particular !== undefined && { particular: input.particular }),
+        ...(input.make !== undefined && { make: input.make }),
+        ...(input.size !== undefined && { size: input.size }),
+        ...(input.quantity !== undefined && { quantity: input.quantity }),
+        ...(input.unit !== undefined && { unit: input.unit }),
+      };
+    });
+    if (!updated) throw new AppError(404, 'Material request not found');
+    return (await this.enrich([updated]))[0];
   }
 
   // ---- Supervisor transitions -------------------------------------------------------------

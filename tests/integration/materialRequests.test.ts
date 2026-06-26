@@ -382,6 +382,64 @@ describe('POST /api/material-requests/:id/decline', () => {
   });
 });
 
+describe('PATCH /api/material-requests/:id (admin edits item details)', () => {
+  it('edits the item fields while requested or processing', async () => {
+    const fromRequested = await request(
+      setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'requested' })] }).app,
+    )
+      .patch('/api/material-requests/mr1')
+      .set(...bearer())
+      .send({ make: 'Hettich Pro', quantity: 50, size: '6 inch' });
+    expect(fromRequested.status).toBe(200);
+    expect(fromRequested.body).toMatchObject({ make: 'Hettich Pro', quantity: 50, size: '6 inch' });
+
+    const fromProcessing = await request(
+      setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'processing' })] }).app,
+    )
+      .patch('/api/material-requests/mr1')
+      .set(...bearer())
+      .send({ particular: 'Corrected name' });
+    expect(fromProcessing.status).toBe(200);
+    expect(fromProcessing.body.particular).toBe('Corrected name');
+  });
+
+  it('409 once a vendor is assigned (accepted) or the item is terminal', async () => {
+    for (const status of ['accepted', 'closed', 'declined', 'cancelled'] as const) {
+      const res = await request(
+        setup(adminVerifier, { requests: [mr({ id: 'mr1', status })] }).app,
+      )
+        .patch('/api/material-requests/mr1')
+        .set(...bearer())
+        .send({ make: 'X' });
+      expect(res.status).toBe(409);
+    }
+  });
+
+  it('400 on an empty patch, 404 for a missing item, 403 for a supervisor', async () => {
+    const empty = await request(
+      setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'requested' })] }).app,
+    )
+      .patch('/api/material-requests/mr1')
+      .set(...bearer())
+      .send({});
+    expect(empty.status).toBe(400);
+
+    const missing = await request(setup(adminVerifier, { requests: [] }).app)
+      .patch('/api/material-requests/nope')
+      .set(...bearer())
+      .send({ make: 'X' });
+    expect(missing.status).toBe(404);
+
+    const sup = await request(
+      setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', status: 'requested' })] }).app,
+    )
+      .patch('/api/material-requests/mr1')
+      .set(...bearer())
+      .send({ make: 'X' });
+    expect(sup.status).toBe(403);
+  });
+});
+
 describe('supervisor transitions (cancel / close)', () => {
   it('cancel: owner cancels a requested item; 403 for a non-owner; 409 once not requested', async () => {
     const ok = await request(setup(supervisorVerifier('sup1'), { requests: [mr({ id: 'mr1', orderBy: 'sup1', status: 'requested' })], workOrders: [workOrder()] }).app)

@@ -41,6 +41,19 @@ export const declineMaterialRequestSchema = z.object({
   remarks: nonEmptyString,
 });
 
+/** Admin edit of the supervisor-entered item fields (to fix wrong entries). Every field is
+ * optional, but at least one must be present. Only the item details — vendor/PO/etc. have their
+ * own flows; status is never changed here. */
+export const editMaterialRequestSchema = z
+  .object({
+    particular: nonEmptyString.optional(),
+    make: nonEmptyString.optional(),
+    size: nonEmptyString.optional(),
+    quantity: z.number().positive().optional(),
+    unit: nonEmptyString.optional(),
+  })
+  .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' });
+
 /** Max bill images a supervisor may attach when closing an item. Single knob — change freely. */
 export const MAX_BILL_IMAGES = 3;
 
