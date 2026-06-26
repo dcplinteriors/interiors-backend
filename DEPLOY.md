@@ -102,7 +102,22 @@ attachment. Note it doesn't cover files orphaned by *replacing* an already-commi
 (e.g. changing a profile photo) — those sit under the permanent prefix; handle separately
 if it ever matters.
 
-## 5. Store the one secret (Firebase Web API key)
+## 5. Firestore composite indexes
+
+The list/count queries filter + order on several fields, which Firestore needs composite
+indexes for; they're declared in [`firestore.indexes.json`](firestore.indexes.json). Deploy
+them — and **re-deploy whenever that file changes** (e.g. a new list filter is added):
+
+```bash
+firebase deploy --only firestore:indexes --project $PROJECT_ID
+```
+
+Builds run in the **background** (a few minutes to backfill); a query that needs a
+still-building index returns a "needs index" error until it's ready. `firebase deploy`
+only **creates** indexes missing from the project — it won't delete ones absent from the
+file unless you pass `--force` (it prints how many such indexes exist).
+
+## 6. Store the one secret (Firebase Web API key)
 
 ```bash
 printf 'YOUR_WEB_API_KEY' | gcloud secrets create FIREBASE_WEB_API_KEY \
@@ -111,7 +126,7 @@ gcloud secrets add-iam-policy-binding FIREBASE_WEB_API_KEY \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/secretmanager.secretAccessor"
 ```
 
-## 6. Deploy
+## 7. Deploy
 
 Builds the Dockerfile via Cloud Build and deploys, in one command:
 
@@ -127,7 +142,7 @@ gcloud run deploy $SERVICE \
 
 The command prints a Service URL like `https://dcpl-backend-xxxxx-el.a.run.app`.
 
-## 7. Point the apps at the new URL
+## 8. Point the apps at the new URL
 
 - Update the Admin and User Flutter apps' API base URL to the Cloud Run URL.
 - Confirm `CORS_ORIGINS` above lists every web origin that calls the API.
@@ -135,7 +150,8 @@ The command prints a Service URL like `https://dcpl-backend-xxxxx-el.a.run.app`.
 
 ## Redeploys
 
-Re-run step 5 (`gcloud run deploy ... --source .`) after any code change.
+Re-run the **Deploy** step (`gcloud run deploy ... --source .`) after any code change.
+If the change adds a Firestore filter/index, also re-run the **Firestore indexes** step.
 
 ## Notes
 
