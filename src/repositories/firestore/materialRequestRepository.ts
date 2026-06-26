@@ -53,6 +53,7 @@ export class FirestoreMaterialRequestRepository implements MaterialRequestReposi
    */
   async list(query: MaterialRequestQuery = {}): Promise<Page<MaterialRequest>> {
     let q: Query = this.col();
+    if (query.supervisor) q = q.where('supervisorId', '==', query.supervisor);
     if (query.workOrder) q = q.where('workOrder', '==', query.workOrder);
     if (query.project) q = q.where('project', '==', query.project);
     if (query.status) q = q.where('status', '==', query.status);

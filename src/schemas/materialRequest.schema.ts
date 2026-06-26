@@ -76,6 +76,8 @@ export const listMaterialRequestQuerySchema = z.object({
   status: z.enum(MATERIAL_REQUEST_STATUSES).optional(),
   workOrder: z.string().optional(),
   project: z.string().optional(),
+  // Admin-only filter by the item's current supervisor (ignored on the supervisor's own list).
+  supervisor: z.string().optional(),
   ...paginationQuery,
 });
 

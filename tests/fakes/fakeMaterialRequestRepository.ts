@@ -95,7 +95,8 @@ export class FakeMaterialRequestRepository implements MaterialRequestRepository 
             ? query.statusIn.includes(r.status)
             : query.status === undefined || r.status === query.status) &&
           (query.project === undefined || r.project === query.project) &&
-          (query.workOrder === undefined || r.workOrder === query.workOrder),
+          (query.workOrder === undefined || r.workOrder === query.workOrder) &&
+          (query.supervisor === undefined || r.supervisorId === query.supervisor),
       )
       .sort(byCreatedAtThenIdDesc);
   }

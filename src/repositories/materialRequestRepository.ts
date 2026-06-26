@@ -8,6 +8,9 @@ export interface MaterialRequestQuery {
   status?: MaterialRequestStatus;
   project?: string;
   workOrder?: string;
+  /** Filter to one supervisor's items by their CURRENT assignment (`supervisorId`) — admin only;
+   * matches the Supervisor column shown in the list. */
+  supervisor?: string;
   /** Page size (clamped by the repo). */
   limit?: number;
   /** Opaque cursor from a previous page's `nextCursor`. */

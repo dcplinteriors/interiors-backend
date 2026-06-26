@@ -228,6 +228,12 @@ describe('GET /api/material-requests (list)', () => {
       .set(...bearer());
     expect(byWo.body.items.map((r: { id: string }) => r.id).sort()).toEqual(['mr1', 'mr3']);
 
+    // Admin can filter by a supervisor (the item's current assignment).
+    const bySupervisor = await request(setup(adminVerifier, opts).app)
+      .get('/api/material-requests?supervisor=sup2')
+      .set(...bearer());
+    expect(bySupervisor.body.items.map((r: { id: string }) => r.id)).toEqual(['mr3']);
+
     // Supervisor sees only items whose CURRENT supervisorId is theirs.
     const mine = await request(setup(supervisorVerifier('sup1'), opts).app)
       .get('/api/material-requests')
