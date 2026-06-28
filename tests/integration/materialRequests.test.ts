@@ -7,10 +7,21 @@ import { FakeWorkOrderRepository } from '../fakes/fakeWorkOrderRepository';
 import { FakeUserRepository } from '../fakes/fakeUserRepository';
 import { FakeCounterRepository } from '../fakes/fakeCounterRepository';
 import { FakeStorageService } from '../fakes/fakeStorageService';
+import { FakeVendorRepository } from '../fakes/fakeVendorRepository';
 import { Project } from '../../src/models/project';
 import { WorkOrder } from '../../src/models/workOrder';
 import { MaterialRequest } from '../../src/models/materialRequest';
 import { UserRecord } from '../../src/models/user';
+import { Vendor } from '../../src/models/vendor';
+
+const vendorRecord = (over: Partial<Vendor> = {}): Vendor => ({
+  id: 'v1',
+  name: 'Steel Co',
+  isActive: true,
+  createdAt: '2026-06-01T00:00:00.000Z',
+  createdBy: 'admin1',
+  ...over,
+});
 
 const project = (over: Partial<Project> = {}): Project => ({
   id: 'p1',
@@ -78,6 +89,7 @@ function setup(
     workOrders?: WorkOrder[];
     requests?: MaterialRequest[];
     users?: UserRecord[];
+    vendors?: Vendor[];
   } = {},
 ) {
   const materialRequestRepository = new FakeMaterialRequestRepository(opts.requests ?? []);
@@ -85,6 +97,7 @@ function setup(
   const workOrderRepository = new FakeWorkOrderRepository(opts.workOrders ?? []);
   const userRepository = new FakeUserRepository(opts.users ?? []);
   const counterRepository = new FakeCounterRepository();
+  const vendorRepository = new FakeVendorRepository(opts.vendors ?? [vendorRecord()]);
   const app = buildApp({
     tokenVerifier: verifier,
     materialRequestRepository,
@@ -92,6 +105,7 @@ function setup(
     workOrderRepository,
     userRepository,
     counterRepository,
+    vendorRepository,
     storageService: new FakeStorageService(),
   });
   return { app, materialRequestRepository };
@@ -320,20 +334,36 @@ describe('admin acceptance flow (accept → assign-vendor)', () => {
     expect(res.body.status).toBe('processing');
   });
 
-  it('assign-vendor moves processing → accepted with supply details', async () => {
-    const { app } = setup(adminVerifier, { requests: [mr({ id: 'mr1', status: 'processing' })] });
+  it('assign-vendor moves processing → accepted, snapshotting the vendor name', async () => {
+    const { app } = setup(adminVerifier, {
+      requests: [mr({ id: 'mr1', status: 'processing' })],
+      vendors: [vendorRecord({ id: 'v1', name: 'Steel Co' })],
+    });
     const res = await request(app)
       .post('/api/material-requests/mr1/assign-vendor')
       .set(...bearer())
-      .send({ expectedDate: '2026-06-20', vendor: 'Steel Co', poNumber: 'PO-9', remarks: 'urgent' });
+      .send({ expectedDate: '2026-06-20', vendorId: 'v1', poNumber: 'PO-9', remarks: 'urgent' });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       status: 'accepted',
       expectedDate: '2026-06-20',
-      vendor: 'Steel Co',
+      vendorId: 'v1',
+      vendor: 'Steel Co', // resolved from the vendor record
       poNumber: 'PO-9',
       remarks: 'urgent',
     });
+  });
+
+  it('400 assigning a vendor that does not exist', async () => {
+    const { app } = setup(adminVerifier, {
+      requests: [mr({ id: 'mr1', status: 'processing' })],
+      vendors: [],
+    });
+    const res = await request(app)
+      .post('/api/material-requests/mr1/assign-vendor')
+      .set(...bearer())
+      .send({ expectedDate: '2026-06-20', vendorId: 'ghost' });
+    expect(res.status).toBe(400);
   });
 
   it('409 assigning a vendor before acceptance (still requested)', async () => {
@@ -341,7 +371,7 @@ describe('admin acceptance flow (accept → assign-vendor)', () => {
     const res = await request(app)
       .post('/api/material-requests/mr1/assign-vendor')
       .set(...bearer())
-      .send({ expectedDate: '2026-06-20', vendor: 'Steel Co' });
+      .send({ expectedDate: '2026-06-20', vendorId: 'v1' });
     expect(res.status).toBe(409);
   });
 

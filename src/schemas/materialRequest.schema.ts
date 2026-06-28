@@ -28,10 +28,11 @@ export const acceptMaterialRequestSchema = z.object({
   remarks: z.string().trim().optional(),
 });
 
-/** Assign vendor (processing → accepted): supply details. `poNumber` is optional manual text. */
+/** Assign vendor (processing → accepted): supply details. `vendorId` references a managed vendor
+ * (the server snapshots its name onto the request); `poNumber` is optional manual text. */
 export const assignVendorSchema = z.object({
   expectedDate: isoDate,
-  vendor: nonEmptyString,
+  vendorId: id,
   poNumber: z.string().trim().optional(),
   remarks: z.string().trim().optional(),
 });

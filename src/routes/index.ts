@@ -6,6 +6,7 @@ import { buildSupervisorRoutes } from './supervisor.routes';
 import { buildProjectRoutes } from './project.routes';
 import { buildWorkOrderRoutes } from './workOrder.routes';
 import { buildMaterialRequestRoutes } from './materialRequest.routes';
+import { buildVendorRoutes } from './vendor.routes';
 import { buildUploadRoutes } from './upload.routes';
 
 /**
@@ -21,6 +22,7 @@ export function buildRoutes(container: Container): Router {
   router.use('/projects', buildProjectRoutes(container));
   router.use('/work-orders', buildWorkOrderRoutes(container));
   router.use('/material-requests', buildMaterialRequestRoutes(container));
+  router.use('/vendors', buildVendorRoutes(container));
   router.use('/uploads', buildUploadRoutes(container));
 
   return router;

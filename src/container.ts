@@ -10,16 +10,19 @@ import { ProjectRepository } from './repositories/projectRepository';
 import { WorkOrderRepository } from './repositories/workOrderRepository';
 import { CounterRepository } from './repositories/counterRepository';
 import { MaterialRequestRepository } from './repositories/materialRequestRepository';
+import { VendorRepository } from './repositories/vendorRepository';
 import { FirestoreUserRepository } from './repositories/firestore/userRepository';
 import { FirestoreProjectRepository } from './repositories/firestore/projectRepository';
 import { FirestoreWorkOrderRepository } from './repositories/firestore/workOrderRepository';
 import { FirestoreCounterRepository } from './repositories/firestore/counterRepository';
 import { FirestoreMaterialRequestRepository } from './repositories/firestore/materialRequestRepository';
+import { FirestoreVendorRepository } from './repositories/firestore/vendorRepository';
 import { NumberingService } from './services/numbering/numberingService';
 import { SupervisorService } from './services/supervisor/supervisorService';
 import { ProjectService } from './services/project/projectService';
 import { WorkOrderService } from './services/workOrder/workOrderService';
 import { MaterialRequestService } from './services/materialRequest/materialRequestService';
+import { VendorService } from './services/vendor/vendorService';
 import { FirebaseStorageService, StorageService } from './services/storage/storageService';
 
 /**
@@ -40,12 +43,14 @@ export interface Container {
   workOrderRepository: WorkOrderRepository;
   counterRepository: CounterRepository;
   materialRequestRepository: MaterialRequestRepository;
+  vendorRepository: VendorRepository;
   // Services
   numberingService: NumberingService;
   supervisorService: SupervisorService;
   projectService: ProjectService;
   workOrderService: WorkOrderService;
   materialRequestService: MaterialRequestService;
+  vendorService: VendorService;
   storageService: StorageService;
 }
 
@@ -62,6 +67,7 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
   const counterRepository = overrides.counterRepository ?? new FirestoreCounterRepository();
   const materialRequestRepository =
     overrides.materialRequestRepository ?? new FirestoreMaterialRequestRepository();
+  const vendorRepository = overrides.vendorRepository ?? new FirestoreVendorRepository();
 
   const numberingService = overrides.numberingService ?? new NumberingService(counterRepository);
   const supervisorService =
@@ -94,10 +100,13 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
       workOrderRepository,
       projectRepository,
       userRepository,
+      vendorRepository,
       numberingService,
       storageService,
       clock,
     });
+  const vendorService =
+    overrides.vendorService ?? new VendorService({ vendorRepository, clock });
 
   return {
     clock,
@@ -109,11 +118,13 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
     workOrderRepository,
     counterRepository,
     materialRequestRepository,
+    vendorRepository,
     numberingService,
     supervisorService,
     projectService,
     workOrderService,
     materialRequestService,
+    vendorService,
     storageService,
   };
 }

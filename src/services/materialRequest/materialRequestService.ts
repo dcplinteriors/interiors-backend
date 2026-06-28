@@ -16,6 +16,7 @@ import {
 import { ProjectRepository } from '../../repositories/projectRepository';
 import { WorkOrderRepository } from '../../repositories/workOrderRepository';
 import { UserRepository } from '../../repositories/userRepository';
+import { VendorRepository } from '../../repositories/vendorRepository';
 import { MaterialRequestView, toMaterialRequestView } from '../../views/materialRequestView';
 import { NumberingService } from '../numbering/numberingService';
 import { StorageService } from '../storage/storageService';
@@ -43,7 +44,8 @@ export interface SubmitInput {
 
 export interface AssignVendorInput {
   expectedDate: string;
-  vendor: string;
+  /** id of a managed vendor; the service snapshots its name onto the request. */
+  vendorId: string;
   poNumber?: string;
   remarks?: string;
 }
@@ -70,6 +72,7 @@ export interface MaterialRequestServiceDeps {
   workOrderRepository: WorkOrderRepository;
   projectRepository: ProjectRepository;
   userRepository: UserRepository;
+  vendorRepository: VendorRepository;
   numberingService: NumberingService;
   storageService: StorageService;
   clock: Clock;
@@ -195,12 +198,16 @@ export class MaterialRequestService {
     return this.transition(id, 'accept', { patch: remarks === undefined ? {} : { remarks } });
   }
 
-  /** processing → accepted (admin assigns the vendor + supply details). */
+  /** processing → accepted (admin assigns the vendor + supply details). The vendor is referenced
+   * by id from the managed `vendors` list; its name is snapshotted onto the request for display. */
   async assignVendor(id: string, input: AssignVendorInput): Promise<MaterialRequestView> {
+    const vendor = await this.deps.vendorRepository.findById(input.vendorId);
+    if (!vendor) throw new AppError(400, 'Vendor not found');
     return this.transition(id, 'assignVendor', {
       patch: {
         expectedDate: input.expectedDate,
-        vendor: input.vendor,
+        vendorId: vendor.id,
+        vendor: vendor.name,
         poNumber: input.poNumber ?? null,
         remarks: input.remarks ?? null,
       },

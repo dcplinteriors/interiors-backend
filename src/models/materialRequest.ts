@@ -52,6 +52,11 @@ export interface MaterialRequest {
 
   // Admin, when assigning the vendor (processing → accepted) / on decline
   expectedDate?: string | null;
+  /** id of the assigned vendor (the `vendors` collection). Null on legacy items assigned before
+   * vendors were managed — they carry only the `vendor` name below. */
+  vendorId?: string | null;
+  /** Snapshot of the vendor's name at assignment (denormalized for display; a later rename of the
+   * vendor doesn't rewrite past requests). Also the only vendor info on legacy items. */
   vendor?: string | null;
   /** Optional, plain manual PO reference the admin types when assigning the vendor. */
   poNumber?: string | null;
