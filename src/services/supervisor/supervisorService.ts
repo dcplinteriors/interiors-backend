@@ -6,21 +6,26 @@ import { UserRepository } from '../../repositories/userRepository';
 import { SupervisorView, toSupervisorView } from '../../views/supervisorView';
 import { Page, PageQuery } from '../../utils/pagination';
 import { AuthAdmin } from '../auth/authAdmin';
-import { InviteEmailService } from '../email/inviteEmailService';
+import { normalizePhone, syntheticEmail } from '../../utils/phone';
+import { generateTempPassword } from '../../utils/password';
 
 export interface CreateSupervisorInput {
   name: string;
-  email: string;
-  phone?: string;
+  /** 10-digit (or `91`-prefixed) phone; normalized into the login identity. */
+  phone: string;
   /** Admin uid creating the account. */
   createdBy: string;
+}
+
+/** A freshly-created supervisor plus the one-time password the admin must hand over. */
+export interface CreateSupervisorResult extends SupervisorView {
+  tempPassword: string;
 }
 
 export interface SupervisorServiceDeps {
   authAdmin: AuthAdmin;
   userRepository: UserRepository;
   workOrderRepository: WorkOrderRepository;
-  inviteEmail: InviteEmailService;
   clock: Clock;
 }
 
@@ -28,24 +33,36 @@ export class SupervisorService {
   constructor(private readonly deps: SupervisorServiceDeps) {}
 
   /**
-   * Creates a supervisor: Firebase Auth user → role claim → `users` record → invite email.
+   * Creates a supervisor: phone → synthetic email + temp password → Firebase Auth user →
+   * role claim → `users` record (flagged `mustChangePassword`). Returns the view plus the
+   * one-time temp password for the admin to relay.
    */
-  async create(input: CreateSupervisorInput): Promise<SupervisorView> {
-    // Normalize email so dedup, the Auth user, and the stored record agree (Firestore
-    // queries are case-sensitive, so we store and compare a single canonical form).
-    const email = input.email.trim().toLowerCase();
+  async create(input: CreateSupervisorInput): Promise<CreateSupervisorResult> {
+    // Phone+password auth is backed by a synthetic email; normalize once so the Auth user,
+    // the stored record, and dedup all agree on a single canonical form.
+    const email = syntheticEmail(input.phone);
+    const phone = normalizePhone(input.phone);
+    if (!email || !phone) {
+      throw new AppError(400, 'Invalid phone number');
+    }
 
     const existing = await this.deps.userRepository.findByEmail(email);
     if (existing) {
-      throw new AppError(409, 'A user with this email already exists');
+      throw new AppError(409, 'A supervisor with this phone already exists');
     }
+
+    const tempPassword = generateTempPassword();
 
     let uid: string;
     try {
-      ({ uid } = await this.deps.authAdmin.createUser({ email, displayName: input.name }));
+      ({ uid } = await this.deps.authAdmin.createUser({
+        email,
+        password: tempPassword,
+        displayName: input.name,
+      }));
     } catch (err) {
       if ((err as { code?: string }).code === 'auth/email-already-exists') {
-        throw new AppError(409, 'A user with this email already exists');
+        throw new AppError(409, 'A supervisor with this phone already exists');
       }
       throw err;
     }
@@ -56,7 +73,7 @@ export class SupervisorService {
       role: 'supervisor',
       name: input.name,
       email,
-      phone: input.phone,
+      phone,
       isActive: true,
       createdAt: this.deps.clock().toISOString(),
       createdBy: input.createdBy,
@@ -64,10 +81,26 @@ export class SupervisorService {
     };
     await this.deps.userRepository.create(record);
 
-    await this.deps.inviteEmail.sendSetPasswordEmail(email);
-
     // A brand-new supervisor has no work orders yet.
-    return { ...record, workOrders: [] };
+    return { ...record, workOrders: [], tempPassword };
+  }
+
+  /**
+   * Resets a supervisor's password to a fresh temp one: revokes existing sessions and re-flags
+   * `mustChangePassword`. Returns the temp password for the admin to relay.
+   */
+  async resetPassword(uid: string): Promise<{ tempPassword: string }> {
+    const user = await this.deps.userRepository.findByUid(uid);
+    if (!user || user.role !== 'supervisor') {
+      throw new AppError(404, 'Supervisor not found');
+    }
+
+    const tempPassword = generateTempPassword();
+    await this.deps.authAdmin.setPassword(uid, tempPassword);
+    await this.deps.authAdmin.revokeRefreshTokens(uid);
+    await this.deps.userRepository.update(uid, { mustChangePassword: true });
+
+    return { tempPassword };
   }
 
   /** One cursor-paginated page of supervisors, each with the names of their assigned work orders. */

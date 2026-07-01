@@ -1,10 +1,6 @@
 import { Clock, systemClock } from './utils/clock';
 import { FirebaseTokenVerifier, TokenVerifier } from './services/auth/tokenVerifier';
 import { AuthAdmin, FirebaseAuthAdmin } from './services/auth/authAdmin';
-import {
-  FirebaseInviteEmailService,
-  InviteEmailService,
-} from './services/email/inviteEmailService';
 import { UserRepository } from './repositories/userRepository';
 import { ProjectRepository } from './repositories/projectRepository';
 import { WorkOrderRepository } from './repositories/workOrderRepository';
@@ -37,7 +33,6 @@ export interface Container {
   clock: Clock;
   tokenVerifier: TokenVerifier;
   authAdmin: AuthAdmin;
-  inviteEmail: InviteEmailService;
   userRepository: UserRepository;
   projectRepository: ProjectRepository;
   workOrderRepository: WorkOrderRepository;
@@ -60,7 +55,6 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
   const clock = overrides.clock ?? systemClock;
   const tokenVerifier = overrides.tokenVerifier ?? new FirebaseTokenVerifier();
   const authAdmin = overrides.authAdmin ?? new FirebaseAuthAdmin();
-  const inviteEmail = overrides.inviteEmail ?? new FirebaseInviteEmailService();
   const userRepository = overrides.userRepository ?? new FirestoreUserRepository();
   const projectRepository = overrides.projectRepository ?? new FirestoreProjectRepository();
   const workOrderRepository = overrides.workOrderRepository ?? new FirestoreWorkOrderRepository();
@@ -72,7 +66,7 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
   const numberingService = overrides.numberingService ?? new NumberingService(counterRepository);
   const supervisorService =
     overrides.supervisorService ??
-    new SupervisorService({ authAdmin, userRepository, workOrderRepository, inviteEmail, clock });
+    new SupervisorService({ authAdmin, userRepository, workOrderRepository, clock });
   const projectService =
     overrides.projectService ??
     new ProjectService({
@@ -112,7 +106,6 @@ export function createContainer(overrides: ContainerOverrides = {}): Container {
     clock,
     tokenVerifier,
     authAdmin,
-    inviteEmail,
     userRepository,
     projectRepository,
     workOrderRepository,

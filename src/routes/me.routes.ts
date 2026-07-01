@@ -11,6 +11,7 @@ export function buildMeRoutes(container: Container): Router {
 
   router.get('/', controller.get);
   router.patch('/', requireRole('supervisor'), controller.update); // supervisor edits own profile
+  router.post('/password-changed', controller.passwordChanged); // any authenticated user
 
   return router;
 }

@@ -10,6 +10,7 @@ export function buildSupervisorRoutes(container: Container): Router {
 
   router.use(authenticate(container.tokenVerifier), requireRole('admin'));
   router.post('/', controller.create);
+  router.post('/:id/reset-password', controller.resetPassword);
   router.get('/', controller.list);
 
   return router;

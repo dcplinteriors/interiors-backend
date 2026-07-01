@@ -15,6 +15,10 @@ export function buildSupervisorController(service: SupervisorService) {
       res.status(201).json(record);
     }),
 
+    resetPassword: asyncHandler(async (req: Request, res: Response) => {
+      res.status(200).json(await service.resetPassword(req.params.id));
+    }),
+
     list: asyncHandler(async (req: Request, res: Response) => {
       const query = listSupervisorsQuerySchema.parse(req.query);
       res.status(200).json(await service.list(query));

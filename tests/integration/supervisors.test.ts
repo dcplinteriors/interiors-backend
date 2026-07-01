@@ -4,9 +4,12 @@ import { TokenVerifier } from '../../src/services/auth/tokenVerifier';
 import { FakeUserRepository } from '../fakes/fakeUserRepository';
 import { FakeWorkOrderRepository } from '../fakes/fakeWorkOrderRepository';
 import { FakeAuthAdmin } from '../fakes/fakeAuthAdmin';
-import { FakeInviteEmailService } from '../fakes/fakeInviteEmailService';
 import { UserRecord } from '../../src/models/user';
 import { WorkOrder } from '../../src/models/workOrder';
+import { SYNTHETIC_EMAIL_DOMAIN } from '../../src/utils/phone';
+
+const PHONE = '9876543210';
+const SYNTHETIC = `919876543210@${SYNTHETIC_EMAIL_DOMAIN}`;
 
 const supervisor = (over: Partial<UserRecord> = {}): UserRecord => ({
   uid: 'sup1',
@@ -26,79 +29,94 @@ function setup(
   const userRepository = new FakeUserRepository(seed);
   const workOrderRepository = new FakeWorkOrderRepository(workOrders);
   const authAdmin = new FakeAuthAdmin();
-  const inviteEmail = new FakeInviteEmailService();
   const app = buildApp({
     tokenVerifier: verifier,
     userRepository,
     workOrderRepository,
     authAdmin,
-    inviteEmail,
   });
-  return { app, userRepository, authAdmin, inviteEmail };
+  return { app, userRepository, authAdmin };
 }
 
 describe('POST /api/supervisors', () => {
-  it('creates a supervisor: Auth user, role claim, record, invite email', async () => {
-    const { app, userRepository, authAdmin, inviteEmail } = setup();
+  it('creates a supervisor: Auth user (with temp password), role claim, record', async () => {
+    const { app, userRepository, authAdmin } = setup();
 
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'Ravi', email: 'ravi@dcpl.test', phone: '9876543210' });
+      .send({ name: 'Ravi', phone: PHONE });
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
       role: 'supervisor',
       name: 'Ravi',
-      email: 'ravi@dcpl.test',
+      email: SYNTHETIC,
+      phone: '919876543210',
       isActive: true,
       mustChangePassword: true,
       createdBy: 'admin1',
       workOrders: [],
     });
     expect(res.body.uid).toBeTruthy();
+    // The one-time temp password is returned so the admin can relay it.
+    expect(typeof res.body.tempPassword).toBe('string');
+    expect(res.body.tempPassword.length).toBeGreaterThanOrEqual(6);
+
     expect(authAdmin.roles.get(res.body.uid)).toBe('supervisor');
-    expect(inviteEmail.sent).toContain('ravi@dcpl.test');
-    expect(await userRepository.findByUid(res.body.uid)).not.toBeNull();
+    // Auth user was created with the synthetic email + the returned temp password.
+    expect(authAdmin.created[0]).toMatchObject({ email: SYNTHETIC, password: res.body.tempPassword });
+
+    const stored = await userRepository.findByUid(res.body.uid);
+    expect(stored).toMatchObject({ email: SYNTHETIC, phone: '919876543210', mustChangePassword: true });
   });
 
-  it('normalizes the email to lowercase (Auth user, record, and dedup agree)', async () => {
+  it('normalizes a messy phone to the canonical synthetic email', async () => {
     const { app, authAdmin } = setup();
 
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'Ravi', email: 'Ravi.K@DCPL.test' });
+      .send({ name: 'Ravi', phone: '+91 (98765) 43210' });
 
     expect(res.status).toBe(201);
-    expect(res.body.email).toBe('ravi.k@dcpl.test');
-    expect(authAdmin.created[0].email).toBe('ravi.k@dcpl.test');
+    expect(res.body.email).toBe(SYNTHETIC);
+    expect(authAdmin.created[0].email).toBe(SYNTHETIC);
   });
 
-  it('treats a different-cased email as a duplicate (409)', async () => {
-    const { app } = setup(adminVerifier, [supervisor({ email: 'dupe@dcpl.test' })]);
+  it('rejects an invalid phone with 400 (no Auth user)', async () => {
+    const { app, authAdmin } = setup();
 
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'X', email: 'DUPE@dcpl.test' });
+      .send({ name: 'Ravi', phone: '12345' }); // too few digits
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(400);
+    expect(authAdmin.created).toHaveLength(0);
   });
 
-  it('rejects a duplicate email with 409 (no Auth user or email)', async () => {
-    const { app, authAdmin, inviteEmail } = setup(adminVerifier, [
-      supervisor({ email: 'dupe@dcpl.test' }),
-    ]);
+  it('rejects a duplicate phone with 409 (no Auth user)', async () => {
+    const { app, authAdmin } = setup(adminVerifier, [supervisor({ email: SYNTHETIC })]);
 
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'X', email: 'dupe@dcpl.test' });
+      .send({ name: 'X', phone: PHONE });
 
     expect(res.status).toBe(409);
     expect(authAdmin.created).toHaveLength(0);
-    expect(inviteEmail.sent).toHaveLength(0);
+  });
+
+  it('treats a differently-formatted but equivalent phone as a duplicate (409)', async () => {
+    const { app } = setup(adminVerifier, [supervisor({ email: SYNTHETIC })]);
+
+    const res = await request(app)
+      .post('/api/supervisors')
+      .set(...bearer())
+      .send({ name: 'X', phone: '919876543210' });
+
+    expect(res.status).toBe(409);
   });
 
   it('maps a Firebase auth/email-already-exists to 409 (not 500)', async () => {
@@ -108,18 +126,15 @@ describe('POST /api/supervisors', () => {
         throw Object.assign(new Error('exists'), { code: 'auth/email-already-exists' });
       },
       setRole: async () => {},
+      setPassword: async () => {},
+      revokeRefreshTokens: async () => {},
     };
-    const app = buildApp({
-      tokenVerifier: adminVerifier,
-      userRepository,
-      authAdmin,
-      inviteEmail: new FakeInviteEmailService(),
-    });
+    const app = buildApp({ tokenVerifier: adminVerifier, userRepository, authAdmin });
 
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'Ghost', email: 'ghost@dcpl.test' });
+      .send({ name: 'Ghost', phone: PHONE });
 
     expect(res.status).toBe(409);
   });
@@ -130,7 +145,7 @@ describe('POST /api/supervisors', () => {
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'X' }); // missing email
+      .send({ name: 'X' }); // missing phone
 
     expect(res.status).toBe(400);
   });
@@ -141,8 +156,48 @@ describe('POST /api/supervisors', () => {
     const res = await request(app)
       .post('/api/supervisors')
       .set(...bearer())
-      .send({ name: 'X', email: 'x@dcpl.test' });
+      .send({ name: 'X', phone: PHONE });
 
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /api/supervisors/:id/reset-password', () => {
+  it('issues a fresh temp password, revokes sessions, and re-flags mustChangePassword', async () => {
+    const { app, userRepository, authAdmin } = setup(adminVerifier, [
+      supervisor({ uid: 'sup1', email: SYNTHETIC, mustChangePassword: false }),
+    ]);
+
+    const res = await request(app)
+      .post('/api/supervisors/sup1/reset-password')
+      .set(...bearer());
+
+    expect(res.status).toBe(200);
+    expect(typeof res.body.tempPassword).toBe('string');
+    expect(res.body.tempPassword.length).toBeGreaterThanOrEqual(6);
+
+    expect(authAdmin.passwords.get('sup1')).toBe(res.body.tempPassword);
+    expect(authAdmin.revoked).toContain('sup1');
+    expect((await userRepository.findByUid('sup1'))?.mustChangePassword).toBe(true);
+  });
+
+  it('returns 404 for an unknown uid', async () => {
+    const { app } = setup();
+    const res = await request(app).post('/api/supervisors/nope/reset-password').set(...bearer());
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when the uid is not a supervisor', async () => {
+    const { app } = setup(adminVerifier, [
+      { uid: 'admin2', role: 'admin', name: 'A', email: 'a@dcpl.test', isActive: true, createdAt: 'x' },
+    ]);
+    const res = await request(app).post('/api/supervisors/admin2/reset-password').set(...bearer());
+    expect(res.status).toBe(404);
+  });
+
+  it('forbids a supervisor from resetting passwords (403)', async () => {
+    const { app } = setup(supervisorVerifier(), [supervisor({ uid: 'sup1', email: SYNTHETIC })]);
+    const res = await request(app).post('/api/supervisors/sup1/reset-password').set(...bearer());
     expect(res.status).toBe(403);
   });
 });

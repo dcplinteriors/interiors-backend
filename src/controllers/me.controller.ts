@@ -16,7 +16,10 @@ function profile(auth: AuthUser, record: UserRecord | null) {
     email: auth.email,
     role: auth.role,
     name: record?.name ?? null,
+    phone: record?.phone ?? null,
     photoUrl: record?.photoUrl ?? null,
+    // Drives the supervisor app's "set a new password" gate after a temp-password sign-in.
+    mustChangePassword: record?.mustChangePassword ?? false,
   };
 }
 
@@ -42,6 +45,14 @@ export function buildMeController(userRepository: UserRepository, storageService
       const photoUrl =
         patch.photoUrl == null ? patch.photoUrl : await storageService.finalizeUpload(patch.photoUrl);
       const record = await userRepository.update(auth.uid, { ...patch, photoUrl });
+      if (!record) throw new AppError(404, 'User not found');
+      res.status(200).json(profile(auth, record));
+    }),
+
+    // Any authenticated user: clear the flag once they've set their own password.
+    passwordChanged: asyncHandler(async (req: Request, res: Response) => {
+      const auth = authOf(req);
+      const record = await userRepository.update(auth.uid, { mustChangePassword: false });
       if (!record) throw new AppError(404, 'User not found');
       res.status(200).json(profile(auth, record));
     }),
